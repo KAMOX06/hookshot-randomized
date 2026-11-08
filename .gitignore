@@ -1,0 +1,13 @@
+# Made from the game's own files: never published
+overlay/
+overlay.new/
+tools/chests.json
+
+# Local to each player
+saves/
+game_folder.txt
+launcher_settings.json
+Rando testing notes.txt
+
+__pycache__/
+*.pyc
