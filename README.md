@@ -88,6 +88,14 @@ Everything is in `tools\`, Python standard library only:
 Notes on what was learned along the way are in the docstrings: the file formats, why each patch looks the way it
 does, and what was tested in game.
 
+## Bugs, ideas and contributing
+
+- **Found a bug?** [Open an issue](https://github.com/KAMOX06/hookshot-randomized/issues/new/choose) with the bug
+  report form: the seed number, the options and the steps to make it happen.
+- **Have an idea?** Use the feature request form on the same page.
+- **Questions or a fun seed to share?** [Discussions](https://github.com/KAMOX06/hookshot-randomized/discussions).
+- **Want to help with code?** See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Credits
 
 - [**Hookshot**](https://github.com/NotRexed/Hookshot) by NotRexed: the native recompilation this randomizer is built

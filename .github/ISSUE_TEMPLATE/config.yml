@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions, help and sharing seeds
+    url: https://github.com/KAMOX06/hookshot-randomized/discussions
+    about: Ask how something works, get help setting up, or share a fun seed.
+  - name: Problems with the recomp itself (Hookshot)
+    url: https://github.com/NotRexed/Hookshot
+    about: If it also happens in the normal game, it's the recompilation, not the randomizer.

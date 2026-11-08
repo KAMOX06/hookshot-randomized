@@ -1,0 +1,28 @@
+name: Feature request
+description: An idea for a new option, shuffle or launcher improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What should the randomizer do?
+      placeholder: "e.g. Shuffle the items sold in shops."
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What would it make better, or what problem does it solve?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Kind
+      options:
+        - New shuffle (shops, NPC gifts, ...)
+        - Logic / beatable seeds
+        - Option or toggle
+        - Cutscene skip
+        - Launcher
+        - Other

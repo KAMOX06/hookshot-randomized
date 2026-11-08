@@ -1,0 +1,81 @@
+name: Bug report
+description: Something broke or behaves wrongly in a seed or the launcher
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Remember there's **no logic yet**: a seed where an item is simply out of reach
+        isn't a bug. Please don't attach game files or saves from other people.
+  - type: input
+    id: seed
+    attributes:
+      label: Seed number
+      description: Shown in the launcher ("Current seed") and on the game window's title.
+      placeholder: "e.g. 657057630"
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options
+      description: Paste the **first line** of `overlay\spoiler.txt` (it lists the seed's options), or say which
+        boxes were ticked.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+      placeholder: "e.g. After opening the Ice Arrows chest, bombs and nuts can't be used."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: Where you were and what you did, step by step. Which chest, which area, child or adult.
+      placeholder: |
+        1. New game on the seed
+        2. Opened the chests in Mido's house, Ice Arrows first
+        3. Held R, switched to bombs, pressed the item button
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where is the problem?
+      options:
+        - In game, on a randomized seed
+        - The launcher window (Randomizer.bat)
+        - Making a seed failed (error in the launcher's log)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Randomizer version
+      placeholder: "e.g. 0.1"
+    validations:
+      required: true
+  - type: input
+    id: recomp
+    attributes:
+      label: Hookshot / HookshotBuilder version
+      description: In the game folder, `hookshot_version.txt` (first line).
+      placeholder: "e.g. v2.0.1"
+  - type: textarea
+    id: log
+    attributes:
+      label: Launcher log or error message
+      description: If making a seed failed, copy the text from the box at the bottom of the launcher.
+      render: text
+  - type: checkboxes
+    id: normal
+    attributes:
+      label: Checks
+      options:
+        - label: The same thing does **not** happen in the normal game ("Normal game" button), as far as I know
