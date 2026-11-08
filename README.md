@@ -111,5 +111,7 @@ does, and what was tested in game.
 
 - Event item shuffle (NPC gifts, e.g. Saria's Ocarina)
 - Shop item shuffle
+- Open child dungeons: enter the Deku Tree, Dodongo's Cavern and Jabu-Jabu's Belly without their story
+  requirements (World option)
 - Logic, so every seed is beatable (with the vanilla rules as options: bombs need the bracelet, magic items need a
   Great Fairy)
