@@ -1,7 +1,7 @@
 # Hookshot Randomized
 
-An item randomizer for the PC recompilation of the Nintendo Switch 2 *Ocarina of Time* remake, built with
-**HookshotBuilder** (`hookshot.exe`).
+An item randomizer for [**Hookshot**](https://github.com/NotRexed/Hookshot), the native PC recompilation of the
+Nintendo Switch 2 *Ocarina of Time* remake (built with HookshotBuilder into `hookshot.exe`).
 
 It shuffles what the game's chests hold, opens up the world, skips cutscenes and fixes the problems an
 out-of-order playthrough runs into. The game's own files are never changed. Each seed is a folder of replacement
@@ -13,7 +13,8 @@ files that `hookshot.exe` loads through `HOS_FS_OVERLAY`, and each seed plays fr
 ## Requirements
 
 - Windows
-- The recompiled game: the folder HookshotBuilder made, with `romfs\` and `bin\hookshot.exe`
+- The recompiled game from [Hookshot](https://github.com/NotRexed/Hookshot): the folder HookshotBuilder made, with
+  `romfs\` and `bin\hookshot.exe`
 - [Python 3.14](https://www.python.org/downloads/) or newer (only the standard library is used; 3.14 is needed for
   `compression.zstd`). Python from python.org or `uv python install 3.14` both work.
 
@@ -86,6 +87,17 @@ Everything is in `tools\`, Python standard library only:
 
 Notes on what was learned along the way are in the docstrings: the file formats, why each patch looks the way it
 does, and what was tested in game.
+
+## Credits
+
+- [**Hookshot**](https://github.com/NotRexed/Hookshot) by NotRexed: the native recompilation this randomizer is built
+  on. Its file overlay (`HOS_FS_OVERLAY`) and per-save user folder (`--user`) are what make seeds possible without
+  touching the game's files. Hookshot is a separate project under its own license (GPL-3.0); none of its code is
+  included here.
+
+## License
+
+[MIT](LICENSE). Covers this repository's code only; the game and Hookshot are not part of it.
 
 ## Roadmap
 
