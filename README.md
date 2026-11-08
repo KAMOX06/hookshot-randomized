@@ -113,5 +113,7 @@ does, and what was tested in game.
 - Shop item shuffle
 - Open child dungeons: enter the Deku Tree, Dodongo's Cavern and Jabu-Jabu's Belly without their story
   requirements (World option)
+- Dungeon maps and compasses that say which dungeon they belong to when you get them
+- Bombchus usable without the Bomb Bag (Items option)
 - Logic, so every seed is beatable (with the vanilla rules as options: bombs need the bracelet, magic items need a
   Great Fairy)
