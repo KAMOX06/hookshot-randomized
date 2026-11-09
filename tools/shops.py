@@ -23,7 +23,7 @@ The shuffle:
 - A shop item moved to a chest is given in the form a chest or the field already uses (CHEST_FORM): TBox_Shield_Deku,
   Item_BombBundle_Small, Obj_Armor_Goron, ...
 - Kept in shops (shuffled between shops only): bottle contents (they need an empty bottle), Recovery Hearts and the
-  small magic jar (no chest form). Left alone: the Happy Mask Shop (a borrowing quest), dungeon items, and chest
+  small magic jar (no chest form). Left alone: the Happy Mask Shop (a borrowing quest), small keys, boss keys, maps and compasses, and chest
   items that aren't pouch items (rupees, the chests' own bundle actors, minigame keys).
 - Untested parts are marked as such in the notes below; the first test seed checks them.
 """
@@ -175,8 +175,11 @@ def no_repeats(shop, fixed, rng):
     had Shop_BombBundle_01 in places 1 and 6, place 1 is sold out before the Deku Tree, and place 6 was refused too
     ("Five bombs? Oh, wait..."). Returns the number of swaps."""
     swaps = 0
+    fixed = set(fixed) | {s for s, v in shop.items() if v.startswith("Item_Dungeon_")}   # (their dungeon goes with them)
+
     def names(s):
-        return [shops_item for sid, shops_item in ((k, shop_form(v)) for k, v in shop.items()) if shop_of(sid) == s]
+        return [shops_item for sid, shops_item in ((k, shop_form(v)) for k, v in shop.items())
+                if shop_of(sid) == s and shops_item]
     for _ in range(200):
         repeat = None
         for sid in sorted(shop):
@@ -210,9 +213,9 @@ def _file(ref):
     return ref.lstrip("?").removeprefix("Work/").removesuffix(".gyml").removesuffix(".bgyml") + ".bgyml"
 
 
-def make_shop_actor(item, price):
-    """(pack bytes, ActorInfo row, GameActorInfo row, PouchActorInfo row) of Shop_Rando_<item>, selling item."""
-    name = RANDO_PREFIX + item
+def make_shop_actor(item, price, name=None):
+    """The pack of Shop_Rando_<item> (or of name), a shelf actor selling item."""
+    name = name or RANDO_PREFIX + item
     tpl = _pack_files(TEMPLATE)
     src = _pack_files(item)
     dump = lambda v: bymlw.dumps(v)
@@ -262,25 +265,31 @@ def make_shop_actor(item, price):
     return pack
 
 
-def add_rows(table, data, prices):
+def add_rows(table, data, prices, instances=None):
     """RSDB table data (BYML, the game's or already patched) with a Shop_Rando_<item> row for each item -> price of
     prices, kept sorted by __RowId. The rows copy the item's own (as the game's Shop_Mask_ rows copy Item_Mask_
     ones), with types kept (bymlw):
     - ActorInfo: the item's model row, under the new name; heap as the larger of the item's and the template shop
       actor's, plus 32 KB (a shelf actor has AI and physics an item actor lacks).
     - GameActorInfo: the template shop actor's row (rigid body layer of a shelf item).
-    - PouchActorInfo: the item's row, with the price and no stock number shown."""
+    - PouchActorInfo: the item's row, with the price and no stock number shown.
+    instances: {shelf actor name: (item, price, actor name)}: more rows, for shelf actors with a name of their own
+    (shopdungeon.py: a dungeon item for one dungeon); their ActorInfo ActorName is the given one (the name the shop
+    knows the item by, Shop_SelectItemName, and its messages' labels)."""
     import copy
     root, meta = bymlw.loads(data)
     rows = {r["__RowId"]: r for r in root}
     new = []
-    for item, price in prices.items():
-        name = RANDO_PREFIX + item
+    todo = [(RANDO_PREFIX + item, item, price, None) for item, price in prices.items()]
+    todo += [(name, item, price, actor) for name, (item, price, actor) in sorted((instances or {}).items())]
+    for name, item, price, actor in todo:
         assert name not in rows, f"row {name} already there"
         if table == ACTOR_INFO:
             r = copy.deepcopy(rows[item])
             heap = max(int(r.get("InstanceHeapSize", 0)), int(rows[TEMPLATE]["InstanceHeapSize"])) + 0x8000
             r["InstanceHeapSize"] = type(rows[TEMPLATE]["InstanceHeapSize"])(heap)
+            if actor:
+                r["ActorName"] = actor
         elif table == GAME_ACTOR_INFO:
             r = copy.deepcopy(rows[TEMPLATE])
         else:
@@ -345,11 +354,12 @@ def sold_out_flag(item, bools):
     return flag if murmur3(flag.encode()) in bools else None
 
 
-def presence_for(old, item, bools, exps):
+def presence_for(old, item, bools, exps, flag=None):
     """(new Presence or None for no change, {BoolExp name: values} it needs) of a shelf copy of item whose Presence
-    was old. bools / exps: the hashes of the game's Bool / BoolExp entries."""
+    was old. bools / exps: the hashes of the game's Bool / BoolExp entries. flag: the sold-out flag, when not the
+    item's IsGet (a dungeon item on a shelf has one of its own, shopdungeon.py)."""
     from gamedata import murmur3
-    flag = sold_out_flag(item, bools)
+    flag = flag or sold_out_flag(item, bools)
     if flag is None:
         return None, {}
     if not old:
@@ -357,7 +367,8 @@ def presence_for(old, item, bools, exps):
     own = old["FlagName"]
     h = murmur3(own.encode())
     assert h in bools or h in exps, f"shelf Presence flag {own} isn't a Bool or BoolExp"
-    name = f"Rando_ShopShelf_{item}_{'Not' if old.get('IsNegation') else ''}{own}"
+    tag = flag if flag.startswith("Rando_") else item   # (one condition per sold flag of its own)
+    name = f"Rando_ShopShelf_{tag}_{'Not' if old.get('IsNegation') else ''}{own}"
     values = [[OP_BOOL, murmur3(flag.encode())], [OP_NOT], [OP_BOOL if h in bools else OP_BOOLEXP, h]]
     if old.get("IsNegation"):
         values.append([OP_NOT])

@@ -28,7 +28,12 @@ NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW
 # (key, label, default, help, available)
 OPTIONS = [
     ("Randomize", [
-        ("shuffle_chests", "Shuffle chest items", True, "Every chest's item is shuffled (dungeon items stay in their dungeon). No logic.", True),
+        ("shuffle_chests", "Shuffle chest items", True, "Every chest's item is shuffled, anywhere. Only small keys, boss keys, maps and compasses stay in their own "
+         "dungeon; the items dungeons normally give (Bomb Bag, Bow, Hookshot, ...) are shuffled too. No logic.", True),
+        ("dungeon_items_anywhere", "Dungeon items anywhere", False,
+         "Small keys, boss keys, maps and compasses can also be in chests outside dungeons and, with shop "
+         "shuffle, on shop shelves (never in another dungeon). They still count for their own dungeon, and their "
+         "name says which. Experimental.", True),
         ("shuffle_shops", "Shuffle shop items", False,
          "Shop items join the pool: they can be in chests and other shops, and chest items in shops. Bottle "
          "contents and hearts stay in shops; the Happy Mask Shop is left alone.", True),
@@ -109,6 +114,8 @@ def describe(info):
     parts = []
     if info.get("shuffle_chests", True):
         parts.append("chests")
+    if info.get("dungeon_items_anywhere"):
+        parts.append("keys/maps anywhere")
     if info.get("shuffle_shops"):
         parts.append("shops")
     flags = info.get("flags", {})
@@ -156,18 +163,56 @@ class QueueWriter:
         pass
 
 
+class Tooltip:
+    """A small text box shown while the pointer is over widget."""
+
+    def __init__(self, widget, text, delay=250):
+        self.widget, self.text, self.delay = widget, text, delay
+        self.tip = self.job = None
+        widget.bind("<Enter>", self.schedule)
+        widget.bind("<Leave>", self.hide)
+        widget.bind("<ButtonPress>", self.hide)
+
+    def schedule(self, _=None):
+        self.job = self.widget.after(self.delay, self.show)
+
+    def show(self):
+        if self.tip:
+            return
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 6
+        y = self.widget.winfo_rooty() - 2
+        self.tip = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.attributes("-topmost", True)
+        tk.Label(tw, text=self.text, justify="left", wraplength=300, background="#ffffe8", foreground="#222222",
+                 relief="solid", borderwidth=1, padx=8, pady=5, font=("Segoe UI", 9)).pack()
+        tw.update_idletasks()   # (kept on the screen: flipped left of the icon near the right edge)
+        if x + tw.winfo_width() > tw.winfo_screenwidth():
+            x = self.widget.winfo_rootx() - tw.winfo_width() - 6
+        tw.wm_geometry(f"+{x}+{y}")
+
+    def hide(self, _=None):
+        if self.job:
+            self.widget.after_cancel(self.job)
+            self.job = None
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
+
+
 class App:
     def __init__(self, root):
         self.root = root
         self.q = queue.Queue()
         self.busy = False
         root.title(TITLE)
-        root.minsize(560, 600)
+        root.minsize(560, 420)
         style = ttk.Style()
         if "vista" in style.theme_names():
             style.theme_use("vista")
         style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"))
         style.configure("Help.TLabel", foreground="#666666")
+        style.configure("Info.TLabel", foreground="#3a78c2", font=("Segoe UI", 10))
         style.configure("Play.TButton", font=("Segoe UI", 10, "bold"))
 
         main = ttk.Frame(root, padding=14)
@@ -195,13 +240,16 @@ class App:
             for key, label, default, help_text, available in opts:
                 v = tk.BooleanVar(value=settings[key] if available else False)
                 self.vars[key] = v
-                cb = ttk.Checkbutton(box, text=label + ("" if available else "  (coming later)"), variable=v,
+                row = ttk.Frame(box)
+                row.pack(anchor="w", fill="x", pady=1)
+                cb = ttk.Checkbutton(row, text=label + ("" if available else "  (coming later)"), variable=v,
                                      command=self.remember)
-                cb.pack(anchor="w")
+                cb.pack(side="left")
                 if not available:
                     cb.state(["disabled"])
-                ttk.Label(box, text=help_text, style="Help.TLabel", wraplength=230, justify="left").pack(
-                    anchor="w", padx=(22, 0), pady=(0, 4))
+                info = ttk.Label(row, text="ⓘ", style="Info.TLabel", cursor="question_arrow")
+                info.pack(side="left", padx=(4, 0))
+                Tooltip(info, help_text)
 
         self.place_row = ttk.Frame(main)
         self.place_text = tk.StringVar()
@@ -315,6 +363,7 @@ class App:
                         shuffle_chests=o["shuffle_chests"], place=test_placements(),
                         start_deku_nut=o["start_deku_nut"], shuffle_shops=o["shuffle_shops"],
                         bombchus_without_bag=o["bombchus_without_bag"], bombs_give_bag=o["bombs_give_bag"],
+                        dungeon_items_anywhere=o["dungeon_items_anywhere"],
                         keep_items=[item for key, item in KEEP_ITEMS.items() if o[key]]) + "\n")
             check = subprocess.run([sys.executable, "-I", str(HERE / "verify_seed.py"), str(OVERLAY)],
                                    capture_output=True, text=True, creationflags=NO_WINDOW)

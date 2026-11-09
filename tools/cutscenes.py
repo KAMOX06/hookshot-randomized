@@ -28,7 +28,11 @@ from timelines import shorten
 
 SARIA_HOUSE = "Event/EventFlow/Dm_Kokiri_0045.bfevfl.zs"
 SARIA_BRIDGE = "Event/EventFlow/Dm_Kokiri_0150.bfevfl.zs"
-FLAGS = {"HavePlayedEvent.Dm_Kokiri_0050": True}
+# IsVisitLocation.KokiriForest: Saria's scene at the house shows the "Kokiri Forest" banner
+# (UISystemActor.EventTriggerOpenLocationUI), which marks the area visited; skipped, the forest stayed unvisited and
+# the pause menu's map said "Unavailable right now", in the forest and in the Deku Tree too (seed 1218, 2026-11-09;
+# the normal game's saves have it on).
+FLAGS = {"HavePlayedEvent.Dm_Kokiri_0050": True, "IsVisitLocation.KokiriForest": True}
 
 
 def _action(f, i):

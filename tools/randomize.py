@@ -73,7 +73,21 @@ DUNGEONS = {"InsideTheDekuTree", "DodongoCavern", "InsideJabuJabuBelly", "Forest
             "ShadowTemple", "SpiritTemple", "BottomOfTheWell", "IceCavern", "GerudoTrainingGround",
             "InsideGanonCastle", "GanonCastle"}
 EXCLUDED_AREAS = {"DreamWorld"}
+# Field areas with a dungeon record of their own (RSDB DungeonParam TargetGameData): a dungeon item picked up there
+# would count for it, so the credited dungeon items aren't placed there.
+NO_CREDIT_AREAS = {"GerudoFortress", "HyruleCastle"}
+# (small keys by a chest event, keycredit.py: the map logic's Int triggers never ran; the others by map logic)
+DUNGEON_CREDITED = ("Item_Dungeon_Map", "Item_Dungeon_Compass", "Item_Dungeon_BossKey", "Item_Dungeon_SmallKey")
 STORY_EVENTS = {"SageOfWater_MelodyGet_Water"}   # "Get" in the name, but it teaches a song: keep it
+
+
+# Chest events a small key's credit event may replace: only cosmetic (the Kokiri Forest chests' scene without Navi's
+# chatter). Story events (Ruto, Nabooru, Dampe's race, the songs) keep their chest free of keys.
+REPLACEABLE_EVENTS = {"KokiriForest_TreasureBox_NaviChatOff"}
+
+
+def has_story_event(loc):
+    return bool(loc["event"]) and not is_item_event(loc["event"]) and loc["event"] not in REPLACEABLE_EVENTS
 
 
 def is_item_event(name):
@@ -278,38 +292,66 @@ def load_chests():
     return list(by_hash.values())
 
 
-def shuffle(locs, rng, slots=None):
+def shuffle(locs, rng, slots=None, dungeon_items_anywhere=False):
     """{chest hash: item}, and with shop slots given (shops.survey()) also {slot id: item}: the shops' items join the
-    pool (shops.assign). Without slots the result is the same as before shop shuffle existed (same seeds)."""
-    assignment = {}
+    pool (shops.assign). Without slots the result is the same as before shop shuffle existed (same seeds).
+    dungeon_items_anywhere: small keys, maps, compasses and boss keys may also go in field-area chests (never another
+    dungeon: there the pickup would count for that dungeon) and, with shops, on shop shelves; each then counts for
+    its own dungeon (chests: keycredit.py, dungeoncredit.py; shelves: shopdungeon.py).
+    Returns (assignment, shop, origins: {chest hash or shop slot id: dungeon} for the dungeon items placed)."""
+    assignment, origins, shop_pre = {}, {}, {}
+    slot_ids = [s["id"] for s in slots or []]
     dungeon_items = collections.defaultdict(list)
     for loc in locs:
         if loc["item"].startswith("Item_Dungeon_") and loc["area"] in DUNGEONS:
             dungeon_items[loc["area"]].append(loc)
+    field = [l for l in locs if l["area"] not in DUNGEONS and l["area"] not in NO_CREDIT_AREAS]
     for area, group in sorted(dungeon_items.items()):
+        if dungeon_items_anywhere:   # keys first, into their own dungeon; then the others, own dungeon or field
+            keys = [l for l in group if l["item"] not in DUNGEON_CREDITED]
+            others = [l for l in group if l["item"] in DUNGEON_CREDITED]
+            own = [l for l in locs if l["area"] == area and l["hash"] not in assignment]
+            rng.shuffle(own)
+            for loc, chest in zip(keys, own):
+                assignment[chest["hash"]] = loc["item"]
+                origins[chest["hash"]] = area
+            for loc in others:   # (the credit is the chest's event: not in chests with a story event of their own)
+                room = [l for l in locs if l["area"] == area or l in field and not has_story_event(l)]
+                room = [l["hash"] for l in room if l["hash"] not in assignment]
+                room += [s for s in slot_ids if s not in shop_pre]
+                place = rng.choice(room)
+                if place in slot_ids:
+                    shop_pre[place] = loc["item"]
+                else:
+                    assignment[place] = loc["item"]
+                origins[place] = area
+            continue
         dungeon_chests = [l for l in locs if l["area"] == area]
         rng.shuffle(dungeon_chests)
         for loc, chest in zip(group, dungeon_chests):
             assignment[chest["hash"]] = loc["item"]
+            origins[chest["hash"]] = area
     placed = {id(l) for g in dungeon_items.values() for l in g}
     free = [l for l in locs if l["hash"] not in assignment]
     pool = [l["item"] for l in locs if id(l) not in placed]
     if slots:
         import shops
-        shop, chest_items = shops.assign([s["id"] for s in slots], free, pool + [s["item"] for s in slots], rng)
+        shop, chest_items = shops.assign([s for s in slot_ids if s not in shop_pre], free,
+                                         pool + [s["item"] for s in slots], rng)
         for chest, item in zip(free, chest_items):
             assignment[chest["hash"]] = item
-        return assignment, shop
+        shop.update(shop_pre)
+        return assignment, shop, origins
     rng.shuffle(pool)
     assert len(pool) == len(free)
     for chest, item in zip(free, pool):
         assignment[chest["hash"]] = item
-    return assignment, {}
+    return assignment, {}, origins
 
 
 def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_bracelet=False, free_magic=False,
           shuffle_chests=True, place=None, start_deku_nut=True, keep_items=(), shuffle_shops=False,
-          bombchus_without_bag=False, bombs_give_bag=False):
+          bombchus_without_bag=False, bombs_give_bag=False, dungeon_items_anywhere=False):
     """Write the overlay for seed into out (replacing it); return a one-line summary.
 
     place: {chest hash or shop slot id: item} for test seeds. Each item is swapped into its place from wherever the
@@ -333,9 +375,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     assert not missing, f"keep: no chest holds {missing}"
     shuffled = [l for l in locs if l["item"] not in keep_items]
     if shuffle_chests:
-        assignment, shop = shuffle(shuffled, rng, slots)
+        assignment, shop, origins = shuffle(shuffled, rng, slots, dungeon_items_anywhere)
     else:
         assignment, shop = {l["hash"]: l["item"] for l in shuffled}, {}
+        origins = {l["hash"]: l["area"] for l in shuffled if l["item"].startswith("Item_Dungeon_")}
     assignment.update({l["hash"]: l["item"] for l in kept})
     for l in kept:
         print(f"  kept: {l['item']} stays in chest {l['hash']} ({l['area']})")
@@ -343,25 +386,50 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     place = {(int(h) if str(h).isdigit() else h): item for h, item in (place or {}).items()}
     where = {**assignment, **shop}   # every place -> item, chests and shop slots
 
-    def fits(p, item):
-        return (shops.shop_form(item) if p in shop else shops.chest_form(item)) is not None
+    area_of = {l["hash"]: l["area"] for l in locs}
+    loc_of = {l["hash"]: l for l in locs}
+
+    def fits(p, item, origin=None):
+        """Whether p can hold item (a dungeon item of dungeon origin: only there, or in a field area if credited, or
+        on a shelf with dungeon items anywhere)."""
+        if p in shop and item.startswith("Item_Dungeon_"):
+            return dungeon_items_anywhere and item in DUNGEON_CREDITED
+        if (shops.shop_form(item) if p in shop else shops.chest_form(item)) is None:
+            return False
+        if item.startswith("Item_Dungeon_") and origin:
+            a = area_of.get(p)
+            if a == origin:
+                return True
+            if p in loc_of and has_story_event(loc_of[p]):
+                return False
+            return item in DUNGEON_CREDITED and a not in DUNGEONS and a not in NO_CREDIT_AREAS
+        return True
 
     for h, item in place.items():
+        home = None
+        if "@" in item:   # ITEM@DUNGEON: that dungeon's copy (maps, compasses, keys)
+            item, home = item.split("@", 1)
         assert h in where and h not in kept_hashes, f"place: no shuffled chest or shop slot {h}"
-        assert fits(h, item), f"place: {item} can't go in {h}"
-        if where[h] != item:   # swap with a copy of item whose place can take what h holds now
+        assert fits(h, item, home), f"place: {item} can't go in {h}"
+        if where[h] != item or (home and origins.get(h) != home):   # swap with a copy of item that fits
             free = lambda c: c not in place and c not in kept_hashes and c != h
-            holders = [c for c, i in where.items() if i == item and free(c)]
+            holders = [c for c, i in where.items() if i == item and free(c) and (home is None or origins.get(c) == home)]
             assert holders, f"place: no {item} left to move"
-            src = next((c for c in holders if fits(c, where[h])), None)
+            src = next((c for c in holders if fits(c, where[h], origins.get(h))), None)
+            org = lambda c: origins.pop(c, None)   # (a dungeon item's own dungeon moves with it)
             if src is not None:
                 where[src], where[h] = where[h], item
+                o_src, o_h = org(src), org(h)
+                moved_origins = {h: o_src, src: o_h}
             else:   # (e.g. a rupee can't go on a shelf): a third place t takes h's item, src takes t's
                 src = holders[0]
-                t = next((c for c, i in where.items() if free(c) and c != src and fits(c, where[h])
-                          and fits(src, i)), None)
+                t = next((c for c, i in where.items() if free(c) and c != src and fits(c, where[h], origins.get(h))
+                          and fits(src, i, origins.get(c))), None)
                 assert t is not None, f"place: can't make room for {item} in {h}"
                 where[t], where[src], where[h] = where[h], where[t], item
+                o_t, o_src, o_h = org(t), org(src), org(h)
+                moved_origins = {t: o_h, src: o_t, h: o_src}
+            origins.update({c: o for c, o in moved_origins.items() if o})
         print(f"  placed: {item} in {'shop slot' if h in shop else 'chest'} {h}")
     assignment = {h: where[h] for h in assignment}
     shop = {s: where[s] for s in shop}
@@ -381,6 +449,24 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     dropped_events = {}
     bag_checks = collections.defaultdict(dict)   # map file -> {chest Hash: BOMB_CHECK}
     chest_kind = collections.defaultdict(dict)   # map file -> {chest Hash: its new actor kind (CHECK_CHEST)}
+    import dungeoncredit
+    import keycredit
+    credits = {}   # chest hash -> (dungeon, flag): a dungeon item outside its dungeon, credited by map logic
+    credit_groups = collections.defaultdict(dict)   # map file -> {chest Hash: logic module name}
+    for loc in locs:
+        item, home = assignment[loc["hash"]], origins.get(loc["hash"])
+        if item in DUNGEON_CREDITED and home and home != loc["area"]:
+            assert loc["area"] not in DUNGEONS and loc["area"] not in NO_CREDIT_AREAS, \
+                f"{item} of {home} placed in {loc['area']}: its pickup would count for that area"
+            credits[loc["hash"]] = (home, dungeoncredit.credit_flag(item, home))
+            assert not has_story_event(loc), f"{item} in story chest {loc['hash']}"
+            for f in loc["files"]:   # (its event has Navi name the dungeon and adds a key: keycredit.py;
+                bag_checks[f].setdefault(loc["hash"], {})["GetEventName"] = \
+                    keycredit.event_name(keycredit.KINDS[item], home)
+                if item != "Item_Dungeon_SmallKey":   # a map, compass or boss key's flag: map logic, dungeoncredit.py)
+                    credit_groups[f][loc["hash"]] = dungeoncredit.module_name(loc["hash"])
+        elif item.startswith("Item_Dungeon_") and home and home != loc["area"]:
+            raise AssertionError(f"{item} of {home} placed in {loc['area']}: not credited")
     for loc in locs:
         actor = chest_actor(assignment[loc["hash"]], bombs_give_bag)
         if needs_bag_check(assignment[loc["hash"]], bombs_give_bag, loc["actor"]):
@@ -393,20 +479,25 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
                 if is_item_event(loc["event"]):
                     drops[f][loc["hash"]] = ["GetEventName"]
                     dropped_events[loc["hash"]] = loc["event"]
+    import shopdungeon
+    dungeon_slots = sorted(s for s, v in shop.items() if v.startswith("Item_Dungeon_"))
+    instances = {sid: shopdungeon.Instance(shop[sid], origins[sid], n + 1) for n, sid in enumerate(dungeon_slots)}
     shelf = collections.defaultdict(dict)   # map file -> {placed shop item Hash: its new Shop_ actor}
     for s in slots:
         if shop[s["id"]] != s["item"]:
             for rel, h in s["copies"]:
-                shelf[rel][h] = shops.shop_form(shop[s["id"]])
+                shelf[rel][h] = instances[s["id"]].shelf if s["id"] in instances else shops.shop_form(shop[s["id"]])
 
-    sold_out = collections.defaultdict(dict)   # map file -> {placed shop item Hash: the item, for its sold-out Presence}
+    sold_out = collections.defaultdict(dict)   # map file -> {placed shop item Hash: (item, its own sold flag or None)}
     for s in slots:
-        if shops.sold_out_flag(shop[s["id"]], gd_hashes("Bool")):
+        if s["id"] in instances or shops.sold_out_flag(shop[s["id"]], gd_hashes("Bool")):
+            own = instances[s["id"]].sold_flag if s["id"] in instances else None
             for rel, h in s["copies"]:
-                sold_out[rel][h] = shop[s["id"]]
+                sold_out[rel][h] = (shop[s["id"]], own)
+    sold_bools = gd_hashes("Bool") | {murmur3(i.sold_flag.encode()) for i in instances.values()}
     exps = {}
     growth = {}
-    for rel in sorted(set(per_file) | set(shelf) | set(sold_out) | set(bag_checks)):
+    for rel in sorted(set(per_file) | set(shelf) | set(sold_out) | set(bag_checks) | set(credit_groups)):
         data, zdict = read_original(rel)
         new = data
         if rel in per_file:
@@ -414,14 +505,16 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
         if rel in bag_checks:
             new = set_chest_checks(new, bag_checks[rel])
             new = set_gyaml(new, chest_kind[rel])
+        if rel in credit_groups:
+            new = dungeoncredit.add_groups(new, credit_groups[rel])
         if rel in shelf:
             new = set_gyaml(new, shelf[rel])
         if rel in sold_out:
             from nxfmt import Byml
             old = {a["Hash"]: a.get("Presence") for a in Byml(data).root["Actors"] if a.get("Hash") in sold_out[rel]}
             pres = {}
-            for h, item in sold_out[rel].items():
-                p, need = shops.presence_for(old[h], item, gd_hashes("Bool"), gd_hashes("BoolExp"))
+            for h, (item, own) in sold_out[rel].items():
+                p, need = shops.presence_for(old[h], item, sold_bools, gd_hashes("BoolExp"), own)
                 pres[h] = p
                 exps.update(need)
             new = shops.set_presences(new, pres)
@@ -430,30 +523,75 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
 
     if slots:
         ddata, ddict = read_original(shops.DISPLAY_SHOP)
-        write_zs(shops.DISPLAY_SHOP, staging, shops.unlock_bombs(ddata), ddict)
+        new = shops.unlock_bombs(ddata)
+        if instances:   # (buying a dungeon item credits its dungeon and sets its sold flag: shopdungeon.py)
+            new = shopdungeon.add_purchase_chain(new, [instances[s] for s in dungeon_slots])
+            growth[shops.DISPLAY_SHOP[:-3]] = len(new) - len(ddata)
+            print(f"  shops: {len(instances)} dungeon items on shelves, credited to their dungeon when bought")
+        write_zs(shops.DISPLAY_SHOP, staging, new, ddict)
         print("  shops: bombs for sale before the Goron's Ruby (DisplayShop checks)")
 
     new_sizes = {}
-    sold = sorted({i for i in shop.values() if shops.shop_form(i).startswith(shops.RANDO_PREFIX)})   # new shelf actors
+    for h, (home, flag) in sorted(credits.items()):   # map logic for the Bool ones (maps, compasses, boss keys)
+        if assignment[h] == "Item_Dungeon_SmallKey":
+            continue
+        name = dungeoncredit.module_name(h)
+        rel = dungeoncredit.module_path(name)[0]
+        dst = staging / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(dungeoncredit.credit_module(name, assignment[h], home))
+        new_sizes[rel] = dst.stat().st_size + dungeoncredit.SIZE_MARGIN
+    kinds = sorted({(keycredit.KINDS[assignment[h]], home) for h, (home, _) in credits.items()})
+    if kinds or instances:   # messages: Navi's (chest events) and the shelf items' names, in every language
+        for rel in keycredit.mals_files():
+            data, zdict = read_original(rel)
+            new = keycredit.add_messages(data, kinds) if kinds else data
+            if instances:
+                new = shopdungeon.add_messages(new, [instances[s] for s in dungeon_slots])
+            write_zs(rel, staging, new, zdict)
+            growth[rel[:-3]] = len(new) - len(data)
+    if kinds:   # one event (flow + rows + Navi's message) per item kind and dungeon with such items outside it
+        _, fdict = read_original(keycredit.SRC_FLOW)
+        for kind, dn in kinds:
+            rel = keycredit.flow_path(kind, dn)
+            flow = keycredit.make_flow(kind, dn)
+            write_zs(rel, staging, flow, fdict)
+            new_sizes[rel[:-3]] = len(flow) + keycredit.SIZE_MARGIN
+        for rel in (keycredit.EVENT_SETTING, keycredit.EVENT_INFO):
+            data, zdict = read_original(rel)
+            new = keycredit.add_rows(rel, data, kinds)
+            write_zs(rel, staging, new, zdict)
+            growth[rel[:-3]] = len(new) - len(data)
+    if credits:
+        print(f"  dungeon items: {len(credits)} outside their dungeon, credited to it by chest events "
+              f"({len(kinds)} events, Navi names the dungeon)")
+    sold = sorted({i for s, i in shop.items() if s not in instances and
+                   (shops.shop_form(i) or "").startswith(shops.RANDO_PREFIX)})   # new shelf actors
     prices = {}
-    if sold:
-        price_rng = random.Random(f"{seed}/prices")
+    price_rng = random.Random(f"{seed}/prices")
+    shelf_rows = {}   # dungeon items on shelves: {shelf actor: (item, price, its name)}
+    for sid in dungeon_slots:
+        inst = instances[sid]
+        shelf_rows[inst.shelf] = (inst.item, shops.price_for(inst.item, price_rng), inst.name)
+    if sold or shelf_rows:
         prices = {i: shops.price_for(i, price_rng) for i in sold}
         _, pack_dict = read_original(f"Pack/Actor/{shops.TEMPLATE}.pack.zs")
-        for item in sold:
-            rel = f"Pack/Actor/{shops.RANDO_PREFIX}{item}.pack.zs"
-            pack = shops.make_shop_actor(item, prices[item])
+        packs = [(f"{shops.RANDO_PREFIX}{i}", i, prices[i]) for i in sold] + \
+                [(name, i, p) for name, (i, p, _) in sorted(shelf_rows.items())]
+        for name, item, price in packs:
+            rel = f"Pack/Actor/{name}.pack.zs"
+            pack = shops.make_shop_actor(item, price, name)
             write_zs(rel, staging, pack, pack_dict)
             new_sizes[rel[:-3]] = len(pack) + shops.PACK_SIZE_MARGIN
         for rel in (shops.ACTOR_INFO, shops.GAME_ACTOR_INFO):
             data, zdict = read_original(rel)
-            new = shops.add_rows(rel, data, prices)
+            new = shops.add_rows(rel, data, prices, shelf_rows)
             write_zs(rel, staging, new, zdict)
             growth[rel[:-3]] = len(new) - len(data)
         print(f"  shops: {sum(1 for s in slots if shop[s['id']] != s['item'])} of {len(slots)} shop slots sell "
               f"something new, {len(sold)} chest items on shelves (new shop actors)")
 
-    if flags or exps:
+    if flags or exps or instances:
         gdl_rel = GDL.relative_to(ROMFS).as_posix()
         orig, gdict = read_original(gdl_rel)
         gdata = orig
@@ -463,8 +601,11 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
             gdata = set_bool_defaults(gdata, bools)
         if ints:
             gdata = set_int_defaults(gdata, ints)
+        if instances:   # (rewrites: after the in-place edits) a saved sold flag per dungeon item on a shelf
+            gdata = shopdungeon.add_sold_flags(gdata, [instances[s] for s in dungeon_slots])
         if exps:   # (after the in-place edits: this one rewrites the file)
             gdata = shops.add_bool_exps(gdata, exps)
+        if len(gdata) != len(orig):
             growth[gdl_rel[:-3]] = len(gdata) - len(orig)
         write_zs(gdl_rel, staging, gdata, gdict)
     if sold_out:
@@ -512,10 +653,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     else:
         idata, idict = read_original(shops.POUCH_INFO)
         pouch_info = (idata, idata, idict)
-    if pouch_info[1] != pouch_info[0] or prices:   # (the magic rows, then the shop rows)
+    if pouch_info[1] != pouch_info[0] or prices or shelf_rows:   # (the magic rows, then the shop rows)
         idata, new, idict = pouch_info
-        if prices:
-            new = shops.add_rows(shops.POUCH_INFO, new, prices)
+        if prices or shelf_rows:
+            new = shops.add_rows(shops.POUCH_INFO, new, prices, shelf_rows)
         write_zs(shops.POUCH_INFO, staging, new, idict)
         growth[shops.POUCH_INFO[:-3]] = len(new) - len(idata)
 
@@ -549,6 +690,8 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
             mark += f" [event {dropped_events[loc['hash']]} removed]"
         if loc["hash"] in kept_hashes:
             mark += "   [kept]"
+        if loc["hash"] in credits:
+            mark += f"   [counts for {credits[loc['hash']][0]}]"
         shown = item if actor == item else f"{actor} (for {item})"
         lines.append(f"{loc['area']:<22} {loc['actor']:<24} {loc['hash']:>20}  {shown}{mark}")
     if slots:
@@ -557,6 +700,8 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
             item = shop[s["id"]]
             price = ""   # (the price set for a new shop actor isn't what the shop asks yet: not shown)
             mark = "" if item == s["item"] else "   (was " + s["item"] + ")"
+            if s["id"] in instances:
+                mark += f"   [counts for {instances[s['id']].dungeon}]"
             lines.append(f"{s['id']:<46} {item}{price}{mark}")
     (staging / "spoiler.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (staging / "seed.json").write_text(json.dumps({"seed": seed, "flags": flags, "intro_skip": intro_skip,
@@ -568,6 +713,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
                                                    "shuffle_shops": bool(slots), "shop": shop,
                                                    "bombchus_without_bag": bombchus_without_bag,
                                                    "bombs_give_bag": bombs_give_bag,
+                                                   "dungeon_items_anywhere": dungeon_items_anywhere,
+                                                   "dungeon_credits": {str(h): list(v) for h, v in credits.items()},
+                                                   "shop_dungeon": {s: [i.item, i.dungeon, i.n, shelf_rows[i.shelf][1]]
+                                                                    for s, i in instances.items()},
                                                    "shop_prices": prices,
                                                    "place": {str(h): i for h, i in place.items()},
                                                    "dropped_events": {str(h): e for h, e in dropped_events.items()}}),
@@ -595,6 +744,8 @@ def main():
                     help="test seeds: put ITEM in chest HASH (repeatable), e.g. 10831981390482426294=Item_BombBag_Small")
     ap.add_argument("--keep", action="append", default=[], metavar="ITEM",
                     help="leave the chest holding ITEM alone (repeatable), e.g. Item_Sword_Kokiri")
+    ap.add_argument("--dungeon-items-anywhere", action="store_true",
+                    help="maps, compasses and boss keys may be outside dungeons too, credited to their own dungeon")
     ap.add_argument("--bombs-give-bag", action="store_true",
                     help="the first bombs found give the Bomb Bag (as Deku Nuts and Sticks give theirs)")
     ap.add_argument("--bombchus-without-bag", action="store_true",
@@ -609,7 +760,7 @@ def main():
     print(build(seed, args.out, flags, not args.keep_intro, not args.keep_cutscenes, args.bombs_need_bracelet,
                 args.free_magic, place=place, start_deku_nut=not args.no_deku_nut, keep_items=args.keep,
                 shuffle_shops=args.shuffle_shops, bombchus_without_bag=args.bombchus_without_bag,
-                bombs_give_bag=args.bombs_give_bag),
+                bombs_give_bag=args.bombs_give_bag, dungeon_items_anywhere=args.dungeon_items_anywhere),
           f"({time.time() - t0:.0f} s)")
 
 

@@ -40,7 +40,8 @@ While a randomized game runs, its window is titled "Hookshot Randomized - seed N
 
 | Section | Option | Default |
 | --- | --- | --- |
-| Randomize | Shuffle chest items: 174 chests. Dungeon keys, maps and compasses stay in their dungeon. **No logic**: a seed can be unbeatable. | on |
+| Randomize | Shuffle chest items: 174 chests, anywhere. Only small keys, boss keys, maps and compasses stay in their own dungeon (shuffled between its chests); the items a dungeon normally gives, such as the Bomb Bag, the Bow or the Hookshot, are shuffled like everything else. **No logic**: a seed can be unbeatable. | on |
+| Randomize | Dungeon items anywhere: small keys, boss keys, maps and compasses can also be in chests outside dungeons and, with shop shuffle, on shop shelves (never in another dungeon). They still count for their own dungeon: Navi or the item's name says which, and a small key shows that dungeon's key count. Experimental | off |
 | Randomize | Shuffle shop items: 64 slots in 8 shops join the pool. Chest items are sold in shops and leave the shelf once owned; shop items can be in chests and other shops. Bottle contents and hearts only move between shops; the Happy Mask Shop is left alone. | off |
 | Randomize | Event items (NPC gifts) | not built yet |
 | Important items | Kokiri Sword stays in its chest | off |
@@ -60,7 +61,7 @@ The same options exist on the command line:
 ```
 python -I tools\randomize.py --seed 123 [--closed-forest] [--closed-door] [--keep-intro] [--keep-cutscenes]
        [--bombs-need-bracelet] [--free-magic] [--no-deku-nut] [--keep Item_Sword_Kokiri] [--place PLACE=ITEM]
-       [--shuffle-shops] [--bombs-give-bag] [--bombchus-without-bag]
+       [--shuffle-shops] [--dungeon-items-anywhere] [--bombs-give-bag] [--bombchus-without-bag]
 python -I tools\verify_seed.py overlay
 ```
 
@@ -87,6 +88,10 @@ Everything is in `tools\`, Python standard library only:
 | `bymlw.py` | BYML reading with types kept and writing, SARC writing: for new actor packs and added table rows |
 | `shops.py` | Shop shuffle: the shop slots, new shop actors for chest items, item table rows, sold-out conditions |
 | `evfl.py`, `instant.py`, `timelines.py`, `cutscenes.py` | BFEVFL v4 event flows; cutscene skips by rerouting flows or cutting timelines |
+| `evfledit.py` | Adding events and actor actions to an event flow |
+| `msbt.py` | MSBT message files: reading, writing, adding messages (with game-data tags such as a key count) |
+| `keycredit.py`, `dungeoncredit.py` | Dungeon items outside their dungeon: chest events and map logic that credit their own dungeon, Navi's messages |
+| `shopdungeon.py` | Dungeon items on shop shelves: a shelf actor, name and saved sold flag each, credited when bought |
 | `ainb.py`, `ainbedit.py` | AINB 0x408 logic: reading, and adding item pushes to the new-game setup |
 | `itempatches.py` | Item table (RSDB PouchActorInfo) and actor pack edits (no free magic) |
 | `gamedata.py` | GameDataList and murmur3 names; new-save defaults |
@@ -121,6 +126,5 @@ does, and what was tested in game.
 - Shop shuffle: quantity signs under the shelves that match the new item
 - Open child dungeons: enter the Deku Tree, Dodongo's Cavern and Jabu-Jabu's Belly without their story
   requirements (World option)
-- Dungeon maps and compasses that say which dungeon they belong to when you get them
 - Logic, so every seed is beatable (with the vanilla rules as options: bombs need the bracelet, magic items need a
   Great Fairy)
