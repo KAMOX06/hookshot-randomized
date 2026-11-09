@@ -240,6 +240,49 @@ def set_int_defaults(data, values_by_hash):
     return bytes(out)
 
 
+def set_gyaml(data, names):
+    """Map data with the Gyaml (actor kind) of each actor Hash -> name of names changed. Actor nodes are never shared
+    (each has its own Hash), so the string index is changed in place."""
+    data = add_strings(data, names.values())
+    b = Byml(data)
+    out = bytearray(data)
+    fields = dict((k, p) for k, t, p in entries(b, b.u32(12)))
+    arr = b.u32(fields["Actors"])
+    m = b.u24(arr + 1)
+    base = arr + 4 + ((m + 3) & ~3)
+    left = dict(names)
+    for j in range(m):
+        if b.d[arr + 4 + j] != 0xC1:
+            continue
+        af = {k: p for k, t, p in entries(b, b.u32(base + 4 * j))}
+        if "Hash" not in af:
+            continue
+        h = struct.unpack_from(b.e + "Q", b.d, b.u32(af["Hash"]))[0]
+        if h in left:
+            struct.pack_into("<I", out, af["Gyaml"], b.strs.index(left.pop(h)))
+    assert not left, f"actors not found: {sorted(left)}"
+    return bytes(out)
+
+
+def add_sizes(table, sizes):
+    """ResourceSizeTable data with new entries (resource path without .zs -> size) added to its crc32 list, which
+    stays sorted. A path whose crc32 is already in the table is refused (it would need the name list)."""
+    t = bytearray(table)
+    assert t[:6] == b"RESTBL"
+    str_size, ncrc, nname = struct.unpack_from("<III", t, 10)
+    end = 22 + 8 * ncrc
+    pairs = [struct.unpack_from("<II", t, 22 + 8 * i) for i in range(ncrc)]
+    have = {c for c, _ in pairs}
+    for path, size in sizes.items():
+        c = binascii.crc32(path.encode())
+        assert c not in have, f"RSTB: {path} collides with an entry already there"
+        pairs.append((c, size))
+        have.add(c)
+    pairs.sort()
+    struct.pack_into("<I", t, 14, len(pairs))
+    return bytes(t[:22]) + b"".join(struct.pack("<II", c, s) for c, s in pairs) + bytes(t[end:])
+
+
 def raise_sizes(table, growth):
     """ResourceSizeTable data with the entry of each resource path (without .zs) raised by its growth in bytes."""
     t = bytearray(table)

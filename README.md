@@ -41,30 +41,36 @@ While a randomized game runs, its window is titled "Hookshot Randomized - seed N
 | Section | Option | Default |
 | --- | --- | --- |
 | Randomize | Shuffle chest items: 174 chests. Dungeon keys, maps and compasses stay in their dungeon. **No logic**: a seed can be unbeatable. | on |
-| Randomize | Shop items, event items (NPC gifts) | not built yet |
+| Randomize | Shuffle shop items: 64 slots in 8 shops join the pool. Chest items are sold in shops (random price, 10 to 90 rupees) and leave the shelf once owned; shop items can be in chests and other shops. Bottle contents and hearts only move between shops; the Happy Mask Shop is left alone. | off |
+| Randomize | Event items (NPC gifts) | not built yet |
 | Important items | Kokiri Sword stays in its chest | off |
 | World | Open Kokiri Forest: the Kokiri at the exit lets you pass | on |
 | World | Open Door of Time (and the Master Sword can be pulled) | on |
 | Skips | Skip the intro: opening movie and Navi waking Link | on |
 | Skips | Skip cutscenes: Saria's scenes, area intros, Kaepora Gaebora's talks | on |
 | Items | Bombs need the Goron's Bracelet: the game's own rule; off lets a child hold bombs without it | off |
+| Items | Bombs give the Bomb Bag: the first bombs found bring the bag, as Deku Nuts and Sticks bring theirs; off, as in the game, bombs found before the bag are lost | off |
+| Items | Bombchus without the Bomb Bag: a save starts with room for 10, so Bombchus work before the bag (the game has one count for bombs and Bombchus, so chest bombs before the bag work too) | off |
 | Items | Magic items give the magic meter: the game's failsafe; off means only Great Fairies give magic | off |
 | Bug fixes | Start with Deku Nuts (0 nuts): stops an adult item a child finds first (e.g. Ice Arrows) from taking the item bar and blocking every item | on |
+| Game | Cheats page in the Insert menu: Hookshot's debug tools (Teleport, no-clip flight, age switch, inventory); starts the game with `HOS_OOT_CHEATS=1`, needs Hookshot v2.0.6+ | off |
 
 The same options exist on the command line:
 
 ```
 python -I tools\randomize.py --seed 123 [--closed-forest] [--closed-door] [--keep-intro] [--keep-cutscenes]
-       [--bombs-need-bracelet] [--free-magic] [--no-deku-nut] [--keep Item_Sword_Kokiri] [--place HASH=ITEM]
+       [--bombs-need-bracelet] [--free-magic] [--no-deku-nut] [--keep Item_Sword_Kokiri] [--place PLACE=ITEM]
+       [--shuffle-shops] [--bombs-give-bag] [--bombchus-without-bag]
 python -I tools\verify_seed.py overlay
 ```
 
-`--place` (or `"place"` in `launcher_settings.json`) forces items into chosen chests for testing. The launcher shows
-active test placements with a Clear button.
+`--place` (or `"place"` in `launcher_settings.json`) forces items into chosen places for testing: a chest's hash, or
+a shop slot as written in the spoiler log (`KokiriForest/Npc_Kokiri_001_Shop/6`). The launcher shows active test
+placements with a Clear button.
 
 ## After a recomp update
 
-Delete `tools\chests.json` (it's rebuilt on the next start), then make a new seed. Every patch checks the original
+Delete `tools\chests.json` and `tools\shops.json` (they're rebuilt on the next start), then make a new seed. Every patch checks the original
 data before changing it, so a game update that moves something stops the build with an error rather than making a
 broken seed.
 
@@ -78,6 +84,8 @@ Everything is in `tools\`, Python standard library only:
 | `randomize.py` | Builds a seed: shuffle, world flags, all patches, spoiler log, `seed.json` |
 | `verify_seed.py` | Checks a seed against the game's files: only the intended bytes changed, items as a whole kept |
 | `nxfmt.py`, `bymledit.py` | zstd (with the game's dictionaries), SARC, BYML reading and in-place editing; resource size table |
+| `bymlw.py` | BYML reading with types kept and writing, SARC writing: for new actor packs and added table rows |
+| `shops.py` | Shop shuffle: the shop slots, new shop actors for chest items, item table rows, sold-out conditions |
 | `evfl.py`, `instant.py`, `timelines.py`, `cutscenes.py` | BFEVFL v4 event flows; cutscene skips by rerouting flows or cutting timelines |
 | `ainb.py`, `ainbedit.py` | AINB 0x408 logic: reading, and adding item pushes to the new-game setup |
 | `itempatches.py` | Item table (RSDB PouchActorInfo) and actor pack edits (no free magic) |
@@ -110,10 +118,9 @@ does, and what was tested in game.
 ## Roadmap
 
 - Event item shuffle (NPC gifts, e.g. Saria's Ocarina)
-- Shop item shuffle
+- Shop shuffle: quantity signs under the shelves that match the new item
 - Open child dungeons: enter the Deku Tree, Dodongo's Cavern and Jabu-Jabu's Belly without their story
   requirements (World option)
 - Dungeon maps and compasses that say which dungeon they belong to when you get them
-- Bombchus usable without the Bomb Bag (Items option)
 - Logic, so every seed is beatable (with the vanilla rules as options: bombs need the bracelet, magic items need a
   Great Fairy)

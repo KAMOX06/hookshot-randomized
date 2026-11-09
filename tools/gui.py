@@ -29,7 +29,9 @@ NO_WINDOW = 0x08000000   # CREATE_NO_WINDOW
 OPTIONS = [
     ("Randomize", [
         ("shuffle_chests", "Shuffle chest items", True, "Every chest's item is shuffled (dungeon items stay in their dungeon). No logic.", True),
-        ("shuffle_shops", "Shuffle shop items", False, "Not built yet.", False),
+        ("shuffle_shops", "Shuffle shop items", False,
+         "Shop items join the pool: they can be in chests and other shops, and chest items in shops (random price, "
+         "10 to 90). Bottle contents and hearts stay in shops; the Happy Mask Shop is left alone.", True),
         ("shuffle_events", "Shuffle event items (NPC gifts)", False, "Not built yet (e.g. Saria's ocarina).", False),
     ]),
     ("Important items", [
@@ -47,6 +49,13 @@ OPTIONS = [
     ("Items", [
         ("bombs_need_bracelet", "Bombs need the Goron's Bracelet", False,
          "The game's own rule: without the bracelet a bomb vanishes as soon as it's taken out.", True),
+        ("bombs_give_bag", "Bombs give the Bomb Bag", False,
+         "The first bombs found (in a chest or a shop) bring the Bomb Bag, as Deku Nuts and Sticks bring theirs. "
+         "Off: as in the game, bombs found before the bag are lost.", True),
+        ("bombchus_without_bag", "Bombchus without the Bomb Bag", False,
+         "Bombchus found or bought before the Bomb Bag can be used (up to 10). The game keeps one count for bombs and "
+         "Bombchus, "
+         "so bombs found in a chest before the bag work too; shops still sell bombs only with the bag.", True),
         ("free_magic", "Magic items give the magic meter", False,
          "The game's failsafe: the Lens of Truth, spells and magic arrows also give magic. Off: only Great Fairies do.", True),
     ]),
@@ -54,7 +63,12 @@ OPTIONS = [
         ("start_deku_nut", "Start with Deku Nuts (0 nuts)", True,
          "Keeps adult items a child finds first (e.g. Ice Arrows) out of the item bar, where they block every item.", True),
     ]),
-]
+    ("Game", [
+        ("debug_menu", "Cheats page in the Insert menu", False,
+         "Hookshot's debug tools: Teleport, no-clip flight, age switch, inventory. Takes effect when the game starts; "
+         "needs Hookshot v2.0.6 or newer.", True),
+    ]),
+]   # ("Game" options are how the game starts, not part of a seed)
 DEFAULTS = {k: d for _, opts in OPTIONS for k, _, d, _, _ in opts}
 KEEP_ITEMS = {"keep_kokiri_sword": "Item_Sword_Kokiri"}   # Important items toggles -> the item kept in its chest
 
@@ -95,6 +109,8 @@ def describe(info):
     parts = []
     if info.get("shuffle_chests", True):
         parts.append("chests")
+    if info.get("shuffle_shops"):
+        parts.append("shops")
     flags = info.get("flags", {})
     if flags.get("KokiriForest_Npc_Kokiri_007_Child_Blocker_00") is False:
         parts.append("open forest")
@@ -106,6 +122,10 @@ def describe(info):
         parts.append("cutscene skips")
     if info.get("bombs_need_bracelet") is False:
         parts.append("bombs without bracelet")
+    if info.get("bombs_give_bag"):
+        parts.append("bombs give the bag")
+    if info.get("bombchus_without_bag"):
+        parts.append("Bombchus without bag")
     if info.get("free_magic") is False:
         parts.append("no free magic")
     for item in info.get("keep_items", []):
@@ -253,7 +273,8 @@ class App:
     def show_place(self):
         place = test_placements()
         if place:
-            self.place_text.set(", ".join(f"{item} in chest {h}" for h, item in place.items()))
+            self.place_text.set(", ".join(f"{item} in {'chest ' if str(h).isdigit() else ''}{h}"
+                                          for h, item in place.items()))
             self.place_row.pack(fill="x", pady=(8, 0))
         else:
             self.place_row.pack_forget()
@@ -292,7 +313,8 @@ class App:
             print(build(seed, OVERLAY, flags, intro_skip=o["intro_skip"], cutscene_skip=o["cutscene_skip"],
                         bombs_need_bracelet=o["bombs_need_bracelet"], free_magic=o["free_magic"],
                         shuffle_chests=o["shuffle_chests"], place=test_placements(),
-                        start_deku_nut=o["start_deku_nut"],
+                        start_deku_nut=o["start_deku_nut"], shuffle_shops=o["shuffle_shops"],
+                        bombchus_without_bag=o["bombchus_without_bag"], bombs_give_bag=o["bombs_give_bag"],
                         keep_items=[item for key, item in KEEP_ITEMS.items() if o[key]]) + "\n")
             check = subprocess.run([sys.executable, "-I", str(HERE / "verify_seed.py"), str(OVERLAY)],
                                    capture_output=True, text=True, creationflags=NO_WINDOW)
@@ -318,7 +340,7 @@ class App:
         if not EXE.exists():
             messagebox.showerror(TITLE, f"The game was not found at {EXE}.")
             return
-        proc = start_game(True, prepare_saves(seed))
+        proc = start_game(True, prepare_saves(seed), cheats=self.vars["debug_menu"].get())
         keep_title(proc.pid, f"{TITLE} - seed {seed}")
         self.write(f"Game started on seed {seed}. On a new seed, pick New Game on the title screen.\n")
 
@@ -331,7 +353,7 @@ class App:
         if not EXE.exists():
             messagebox.showerror(TITLE, f"The game was not found at {EXE}.")
             return
-        start_game(False)
+        start_game(False, cheats=self.vars["debug_menu"].get())
         self.write("Normal game started (no randomizer, your normal saves).\n")
 
     def open_spoiler(self):
@@ -342,11 +364,14 @@ class App:
             messagebox.showinfo(TITLE, "No seed made yet.")
 
 
-def start_game(overlay, user_dir=None):
+def start_game(overlay, user_dir=None, cheats=False):
     env = dict(os.environ)
     env.pop("HOS_FS_OVERLAY", None)
     if overlay:
         env["HOS_FS_OVERLAY"] = str(OVERLAY)
+    env.pop("HOS_OOT_CHEATS", None)
+    if cheats:   # (Hookshot's Insert menu shows its Cheats row only with this set: gpu/vk/vk_menu.cpp menu_init)
+        env["HOS_OOT_CHEATS"] = "1"
     args = [str(EXE)] + (["--user", str(user_dir)] if user_dir else [])
     return subprocess.Popen(args, cwd=str(launcher.GAME), env=env, creationflags=subprocess.DETACHED_PROCESS)
 

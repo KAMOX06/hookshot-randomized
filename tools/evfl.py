@@ -151,6 +151,7 @@ def links(flow):
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")   # (some flows hold Japanese names)
     f = Flow(unzs((ROMFS / "Event" / "EventFlow" / f"{sys.argv[1]}.bfevfl.zs").read_bytes()))
     acts = f.actors()
     targets = {t for _, t, _ in links(f)}

@@ -64,7 +64,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from nxfmt import ROMFS
-from bymledit import read_original, write_zs, apply_items, set_bool_defaults, set_int_defaults, raise_sizes
+from bymledit import read_original, write_zs, apply_items, set_bool_defaults, set_int_defaults, raise_sizes, \
+    set_gyaml, add_sizes
 from gamedata import GDL, murmur3
 
 HERE = Path(__file__).parent
@@ -163,6 +164,33 @@ def skip_intro(data):
     return bytes(out)
 
 
+# Bombs give the Bomb Bag (option): Deku Nuts and Sticks bring their bag with the first ones found (their PouchActorInfo
+# rows have IsAbleToGetBagIfGet and a SmallBagActor; Item_NutBag_Small came with the first nuts, tested 2026-11-08).
+# Bombs have the SmallBagActor (Item_BombBag_Small) but not the flag, so bombs found without the bag are lost, as in
+# the game. The option sets the flag on the bombs' rows.
+BOMB_ROWS = ("Item_Bomb", "Obj_Bomb")
+
+
+def bombs_get_bag(data):
+    """PouchActorInfo data with IsAbleToGetBagIfGet set on the bombs' rows (a rewrite, bymlw)."""
+    import bymlw
+    root, meta = bymlw.loads(data)
+    rows = {r["__RowId"]: r for r in root}
+    for n in BOMB_ROWS:
+        assert rows[n].get("SmallBagActor", "").endswith("Item_BombBag_Small.engine__actor__ActorParam.gyml"), \
+            f"PouchActorInfo changed: {n} has no Bomb Bag as its SmallBagActor"
+        rows[n]["IsAbleToGetBagIfGet"] = True
+    return bymlw.dumps(root, meta["endian"], meta["version"])
+
+
+# Bombchus without the Bomb Bag (option): in this remake Bombchus have no capacity of their own, they use the bombs'
+# (PouchActorInfo Item_Bombchu: MaxNumGameData "Bomb"; the save has no PouchContentMaxNum.Bombchu). Without a Bomb Bag
+# that capacity is 0, so Bombchus found are lost (tested 2026-11-09, seed 1202); the bag sets it to 20 and fills both.
+# The option starts a save at 10. The bag itself isn't given: shops still won't sell bombs and bombs don't drop.
+# Not 20 (the small bag's): the bag fills bombs (and owned Bombchus) only when it raises the capacity, so with 20
+# already a bought bag gave no bombs (seed 1204, 2026-11-09); from 10 it still raises it to 20.
+# Limit of one shared counter: bombs found in a chest before the bag can be held too.
+BOMBCHUS_WITHOUT_BAG = {"PouchContentMaxNum.Bomb": 10}
 BOMB_PACK = "Pack/Actor/Item_Bomb.pack.zs"
 BOMB_LIFT = "Component/LiftableParam/Item_Bomb.game__component__LiftableParam.bgyml"
 LIFT_GRADE_BOMBFLOWER = 3655598229   # Item_Bomb, Obj_BombFlower_*: needs the Goron's Bracelet
@@ -193,6 +221,19 @@ def bombs_without_bracelet(data):
     return bytes(out)
 
 
+_gd_hashes = {}
+
+
+def gd_hashes(kind):
+    """The hashes of the game's GameDataList entries of one kind (Bool, BoolExp, ...)."""
+    if kind not in _gd_hashes:
+        from nxfmt import load_byml
+        data = load_byml(GDL)["Data"]
+        for k, entries in data.items():
+            _gd_hashes[k] = {int(e["Hash"]) for e in entries if isinstance(e, dict) and "Hash" in e}
+    return _gd_hashes.get(kind, set())
+
+
 def load_chests():
     if not (HERE / "chests.json").exists():   # made from the game's files, so not shipped: build it on first use
         import subprocess
@@ -211,7 +252,9 @@ def load_chests():
     return list(by_hash.values())
 
 
-def shuffle(locs, rng):
+def shuffle(locs, rng, slots=None):
+    """{chest hash: item}, and with shop slots given (shops.survey()) also {slot id: item}: the shops' items join the
+    pool (shops.assign). Without slots the result is the same as before shop shuffle existed (same seeds)."""
     assignment = {}
     dungeon_items = collections.defaultdict(list)
     for loc in locs:
@@ -225,46 +268,83 @@ def shuffle(locs, rng):
     placed = {id(l) for g in dungeon_items.values() for l in g}
     free = [l for l in locs if l["hash"] not in assignment]
     pool = [l["item"] for l in locs if id(l) not in placed]
+    if slots:
+        import shops
+        shop, chest_items = shops.assign([s["id"] for s in slots], free, pool + [s["item"] for s in slots], rng)
+        for chest, item in zip(free, chest_items):
+            assignment[chest["hash"]] = item
+        return assignment, shop
     rng.shuffle(pool)
     assert len(pool) == len(free)
     for chest, item in zip(free, pool):
         assignment[chest["hash"]] = item
-    return assignment
+    return assignment, {}
 
 
 def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_bracelet=False, free_magic=False,
-          shuffle_chests=True, place=None, start_deku_nut=True, keep_items=()):
+          shuffle_chests=True, place=None, start_deku_nut=True, keep_items=(), shuffle_shops=False,
+          bombchus_without_bag=False, bombs_give_bag=False):
     """Write the overlay for seed into out (replacing it); return a one-line summary.
 
-    place: {chest hash: item} for test seeds. Each item is swapped into its chest from wherever the shuffle put it
-    (that chest gets the one it held), so the items as a whole stay the same.
+    place: {chest hash or shop slot id: item} for test seeds. Each item is swapped into its place from wherever the
+    shuffle put it (that place gets the one it held), so the items as a whole stay the same.
     keep_items: items (e.g. Item_Sword_Kokiri) whose chests are left out of the shuffle and keep them (and their
     item event, so they play as in the game).
+    shuffle_shops: the shops' items join the pool (shops.py); needs shuffle_chests.
     """
     import cutscenes
+    import shops
     if cutscene_skip:
         flags = {**flags, **cutscenes.FLAGS}
+    if bombchus_without_bag:
+        flags = {**flags, **BOMBCHUS_WITHOUT_BAG}
     rng = random.Random(seed)
     locs = load_chests()
+    slots = shops.survey() if shuffle_shops and shuffle_chests else []
     keep_items = set(keep_items)
     kept = [l for l in locs if l["item"] in keep_items]
     missing = keep_items - {l["item"] for l in kept}
     assert not missing, f"keep: no chest holds {missing}"
     shuffled = [l for l in locs if l["item"] not in keep_items]
-    assignment = shuffle(shuffled, rng) if shuffle_chests else {l["hash"]: l["item"] for l in shuffled}
+    if shuffle_chests:
+        assignment, shop = shuffle(shuffled, rng, slots)
+    else:
+        assignment, shop = {l["hash"]: l["item"] for l in shuffled}, {}
     assignment.update({l["hash"]: l["item"] for l in kept})
     for l in kept:
         print(f"  kept: {l['item']} stays in chest {l['hash']} ({l['area']})")
     kept_hashes = {l["hash"] for l in kept}
-    place = {int(h): item for h, item in (place or {}).items()}
+    place = {(int(h) if str(h).isdigit() else h): item for h, item in (place or {}).items()}
+    where = {**assignment, **shop}   # every place -> item, chests and shop slots
+
+    def fits(p, item):
+        return (shops.shop_form(item) if p in shop else shops.chest_form(item)) is not None
+
     for h, item in place.items():
-        assert h in assignment and h not in kept_hashes, f"place: no shuffled chest {h}"
-        src = next((c for c, i in assignment.items() if i == item and c not in place and c not in kept_hashes), None)
-        assert src is not None or assignment[h] == item, f"place: no {item} left in the chests"
-        if src is not None:
-            assignment[src], assignment[h] = assignment[h], item
-        print(f"  placed: {item} in chest {h}")
-    assert sorted(assignment.values()) == sorted(l["item"] for l in locs), "items lost or duplicated"
+        assert h in where and h not in kept_hashes, f"place: no shuffled chest or shop slot {h}"
+        assert fits(h, item), f"place: {item} can't go in {h}"
+        if where[h] != item:   # swap with a copy of item whose place can take what h holds now
+            free = lambda c: c not in place and c not in kept_hashes and c != h
+            holders = [c for c, i in where.items() if i == item and free(c)]
+            assert holders, f"place: no {item} left to move"
+            src = next((c for c in holders if fits(c, where[h])), None)
+            if src is not None:
+                where[src], where[h] = where[h], item
+            else:   # (e.g. a rupee can't go on a shelf): a third place t takes h's item, src takes t's
+                src = holders[0]
+                t = next((c for c, i in where.items() if free(c) and c != src and fits(c, where[h])
+                          and fits(src, i)), None)
+                assert t is not None, f"place: can't make room for {item} in {h}"
+                where[t], where[src], where[h] = where[h], where[t], item
+        print(f"  placed: {item} in {'shop slot' if h in shop else 'chest'} {h}")
+    assignment = {h: where[h] for h in assignment}
+    shop = {s: where[s] for s in shop}
+    if shop:
+        n = shops.no_repeats(shop, set(place), random.Random(f"{seed}/shops"))
+        if n:
+            print(f"  shops: {n} swaps so that no shop sells the same item twice")
+    assert sorted(list(assignment.values()) + list(shop.values())) == \
+        sorted([l["item"] for l in locs] + [s["item"] for s in slots]), "items lost or duplicated"
 
     out = Path(out)
     staging = out.with_name(out.name + ".new")
@@ -276,27 +356,84 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     for loc in locs:
         if assignment[loc["hash"]] != loc["item"]:
             for f in loc["files"]:
-                per_file[f][loc["hash"]] = assignment[loc["hash"]]
+                per_file[f][loc["hash"]] = shops.chest_form(assignment[loc["hash"]])
                 if is_item_event(loc["event"]):
                     drops[f][loc["hash"]] = ["GetEventName"]
                     dropped_events[loc["hash"]] = loc["event"]
+    shelf = collections.defaultdict(dict)   # map file -> {placed shop item Hash: its new Shop_ actor}
+    for s in slots:
+        if shop[s["id"]] != s["item"]:
+            for rel, h in s["copies"]:
+                shelf[rel][h] = shops.shop_form(shop[s["id"]])
 
+    sold_out = collections.defaultdict(dict)   # map file -> {placed shop item Hash: the item, for its sold-out Presence}
+    for s in slots:
+        if shops.sold_out_flag(shop[s["id"]], gd_hashes("Bool")):
+            for rel, h in s["copies"]:
+                sold_out[rel][h] = shop[s["id"]]
+    exps = {}
     growth = {}
-    for rel, items in sorted(per_file.items()):
+    for rel in sorted(set(per_file) | set(shelf) | set(sold_out)):
         data, zdict = read_original(rel)
-        new = apply_items(data, items, drops[rel])
+        new = data
+        if rel in per_file:
+            new = apply_items(new, per_file[rel], drops[rel])
+        if rel in shelf:
+            new = set_gyaml(new, shelf[rel])
+        if rel in sold_out:
+            from nxfmt import Byml
+            old = {a["Hash"]: a.get("Presence") for a in Byml(data).root["Actors"] if a.get("Hash") in sold_out[rel]}
+            pres = {}
+            for h, item in sold_out[rel].items():
+                p, need = shops.presence_for(old[h], item, gd_hashes("Bool"), gd_hashes("BoolExp"))
+                pres[h] = p
+                exps.update(need)
+            new = shops.set_presences(new, pres)
         write_zs(rel, staging, new, zdict)
         growth[rel[:-3]] = len(new) - len(data)
 
-    if flags:
+    if slots:
+        ddata, ddict = read_original(shops.DISPLAY_SHOP)
+        write_zs(shops.DISPLAY_SHOP, staging, shops.unlock_bombs(ddata), ddict)
+        print("  shops: bombs for sale before the Goron's Ruby (DisplayShop checks)")
+
+    new_sizes = {}
+    sold = sorted({i for i in shop.values() if not i.startswith("Shop_")})   # chest items now on a shelf
+    prices = {}
+    if sold:
+        price_rng = random.Random(f"{seed}/prices")
+        prices = {i: shops.price_for(i, price_rng) for i in sold}
+        _, pack_dict = read_original(f"Pack/Actor/{shops.TEMPLATE}.pack.zs")
+        for item in sold:
+            rel = f"Pack/Actor/{shops.RANDO_PREFIX}{item}.pack.zs"
+            pack = shops.make_shop_actor(item, prices[item])
+            write_zs(rel, staging, pack, pack_dict)
+            new_sizes[rel[:-3]] = len(pack) + shops.PACK_SIZE_MARGIN
+        for rel in (shops.ACTOR_INFO, shops.GAME_ACTOR_INFO):
+            data, zdict = read_original(rel)
+            new = shops.add_rows(rel, data, prices)
+            write_zs(rel, staging, new, zdict)
+            growth[rel[:-3]] = len(new) - len(data)
+        print(f"  shops: {sum(1 for s in slots if shop[s['id']] != s['item'])} of {len(slots)} shop slots sell "
+              f"something new, {len(sold)} chest items on shelves (new shop actors)")
+
+    if flags or exps:
         gdl_rel = GDL.relative_to(ROMFS).as_posix()
-        gdata, gdict = read_original(gdl_rel)
+        orig, gdict = read_original(gdl_rel)
+        gdata = orig
         bools = {murmur3(n.encode()): (n, v) for n, v in flags.items() if isinstance(v, bool)}
         ints = {murmur3(n.encode()): (n, v) for n, v in flags.items() if not isinstance(v, bool)}
-        gdata = set_bool_defaults(gdata, bools)
+        if bools:
+            gdata = set_bool_defaults(gdata, bools)
         if ints:
             gdata = set_int_defaults(gdata, ints)
+        if exps:   # (after the in-place edits: this one rewrites the file)
+            gdata = shops.add_bool_exps(gdata, exps)
+            growth[gdl_rel[:-3]] = len(gdata) - len(orig)
         write_zs(gdl_rel, staging, gdata, gdict)
+    if sold_out:
+        print(f"  shops: {sum(len(v) for v in sold_out.values())} shelf copies leave once their item is owned "
+              f"({len(exps)} new BoolExp conditions)")
 
     if all(flags.get(k) == v for k, v in OPEN_DOOR.items()):
         for rel, patch in ((DOOR_LOGIC, wire_door_to_flag), (SWORD_LOGIC, first_draw_before_allsage)):
@@ -329,9 +466,21 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
         idata, idict = read_original(itempatches.POUCH_INFO)
         new, rows = itempatches.rsdb_no_free_magic(idata)
         assert rows, "PouchActorInfo: no magic rows found"
-        write_zs(itempatches.POUCH_INFO, staging, new, idict)
+        pouch_info = (idata, new, idict)
         print(f"  magic: {len(rows)} items no longer give the magic meter (only Great Fairies do): "
               f"item table rows and {len(magic_packs)} item packs")
+    else:
+        idata, idict = read_original(shops.POUCH_INFO)
+        pouch_info = (idata, idata, idict)
+    if pouch_info[1] != pouch_info[0] or prices or bombs_give_bag:   # (magic rows, the bag rule, shop rows)
+        idata, new, idict = pouch_info
+        if bombs_give_bag:
+            new = bombs_get_bag(new)
+            print(f"  bombs: the first bombs found give the Bomb Bag ({', '.join(BOMB_ROWS)})")
+        if prices:
+            new = shops.add_rows(shops.POUCH_INFO, new, prices)
+        write_zs(shops.POUCH_INFO, staging, new, idict)
+        growth[shops.POUCH_INFO[:-3]] = len(new) - len(idata)
 
     if start_deku_nut:
         import ainbedit
@@ -348,7 +497,7 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
 
     table_rel = RSTB.relative_to(ROMFS).as_posix()
     tdata, tdict = read_original(table_rel)
-    write_zs(table_rel, staging, raise_sizes(tdata, growth), tdict)
+    write_zs(table_rel, staging, add_sizes(raise_sizes(tdata, growth), new_sizes), tdict)
 
     moved = sum(1 for l in locs if assignment[l["hash"]] != l["item"])
     lines = [f"Chest randomizer, no logic. Seed {seed}. Chests shuffled: {shuffle_chests}. Flags: {flags or 'none changed'}. Intro skip: {intro_skip}. "
@@ -361,7 +510,16 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
             mark += f" [event {dropped_events[loc['hash']]} removed]"
         if loc["hash"] in kept_hashes:
             mark += "   [kept]"
-        lines.append(f"{loc['area']:<22} {loc['actor']:<24} {loc['hash']:>20}  {assignment[loc['hash']]}{mark}")
+        item = assignment[loc["hash"]]
+        shown = item if shops.chest_form(item) == item else f"{shops.chest_form(item)} (shop item {item})"
+        lines.append(f"{loc['area']:<22} {loc['actor']:<24} {loc['hash']:>20}  {shown}{mark}")
+    if slots:
+        lines += ["", f"Shops: {len(slots)} slots (shop slot id = area/shopkeeper/shelf place).", ""]
+        for s in slots:
+            item = shop[s["id"]]
+            price = f"  for {prices[item]} rupees" if item in prices else ""
+            mark = "" if item == s["item"] else "   (was " + s["item"] + ")"
+            lines.append(f"{s['id']:<46} {item}{price}{mark}")
     (staging / "spoiler.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (staging / "seed.json").write_text(json.dumps({"seed": seed, "flags": flags, "intro_skip": intro_skip,
                                                    "cutscene_skip": cutscene_skip,
@@ -369,6 +527,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
                                                    "free_magic": free_magic, "magic_packs": magic_packs,
                                                    "shuffle_chests": shuffle_chests, "start_deku_nut": start_deku_nut,
                                                    "keep_items": sorted(keep_items),
+                                                   "shuffle_shops": bool(slots), "shop": shop,
+                                                   "bombchus_without_bag": bombchus_without_bag,
+                                                   "bombs_give_bag": bombs_give_bag,
+                                                   "shop_prices": prices,
                                                    "place": {str(h): i for h, i in place.items()},
                                                    "dropped_events": {str(h): e for h, e in dropped_events.items()}}),
                                        encoding="utf-8")
@@ -395,13 +557,21 @@ def main():
                     help="test seeds: put ITEM in chest HASH (repeatable), e.g. 10831981390482426294=Item_BombBag_Small")
     ap.add_argument("--keep", action="append", default=[], metavar="ITEM",
                     help="leave the chest holding ITEM alone (repeatable), e.g. Item_Sword_Kokiri")
+    ap.add_argument("--bombs-give-bag", action="store_true",
+                    help="the first bombs found give the Bomb Bag (as Deku Nuts and Sticks give theirs)")
+    ap.add_argument("--bombchus-without-bag", action="store_true",
+                    help="Bombchus can be held without the Bomb Bag (a save starts with bomb capacity 10)")
+    ap.add_argument("--shuffle-shops", action="store_true",
+                    help="the shops' items join the pool: shop items in chests and other shops, chest items in shops")
     args = ap.parse_args()
     seed = args.seed if args.seed is not None else random.SystemRandom().randrange(10**9)
     flags = {**({} if args.closed_forest else OPEN_FOREST), **({} if args.closed_door else OPEN_DOOR)}
     place = dict(p.split("=", 1) for p in args.place)
     t0 = time.time()
     print(build(seed, args.out, flags, not args.keep_intro, not args.keep_cutscenes, args.bombs_need_bracelet,
-                args.free_magic, place=place, start_deku_nut=not args.no_deku_nut, keep_items=args.keep),
+                args.free_magic, place=place, start_deku_nut=not args.no_deku_nut, keep_items=args.keep,
+                shuffle_shops=args.shuffle_shops, bombchus_without_bag=args.bombchus_without_bag,
+                bombs_give_bag=args.bombs_give_bag),
           f"({time.time() - t0:.0f} s)")
 
 

@@ -11,3 +11,4 @@ Rando testing notes.txt
 
 __pycache__/
 *.pyc
+tools/shops.json
