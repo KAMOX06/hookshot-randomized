@@ -50,8 +50,8 @@ OPTIONS = [
         ("bombs_need_bracelet", "Bombs need the Goron's Bracelet", False,
          "The game's own rule: without the bracelet a bomb vanishes as soon as it's taken out.", True),
         ("bombs_give_bag", "Bombs give the Bomb Bag", False,
-         "The first bombs found (in a chest or a shop) bring the Bomb Bag, as Deku Nuts and Sticks bring theirs. "
-         "Off: as in the game, bombs found before the bag are lost.", True),
+         "On: as in the game, the first bombs found in a chest bring the Bomb Bag. Off: bombs only come with the "
+         "Bomb Bag; bomb packs in chests hold Bombchus instead (the game can't be made to keep the bag back).", True),
         ("bombchus_without_bag", "Bombchus without the Bomb Bag", False,
          "Bombchus found or bought before the Bomb Bag can be used (up to 10). The game keeps one count for bombs and "
          "Bombchus, "

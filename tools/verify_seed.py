@@ -25,7 +25,12 @@ for line in (overlay / "spoiler.txt").read_text(encoding="utf-8").splitlines()[3
         break   # (the shop list follows)
     p = line.split()
     spoiler[int(p[2])] = (p[0], p[3])
-    pool_item[int(p[2])] = p[6].rstrip(")") if len(p) > 6 and p[4:6] == ["(shop", "item"] else p[3]
+    if len(p) > 6 and p[4:6] == ["(shop", "item"]:   # (older spoilers)
+        pool_item[int(p[2])] = p[6].rstrip(")")
+    elif len(p) > 5 and p[4] == "(for":
+        pool_item[int(p[2])] = p[5].rstrip(")")
+    else:
+        pool_item[int(p[2])] = p[3]
 
 import shops
 seedinfo = json.loads((overlay / "seed.json").read_text(encoding="utf-8"))
@@ -40,6 +45,8 @@ for sid, item in shop.items():
         shelf_item[(rel, h)] = item
     if shops.shop_form(item) is None:
         problems.append(f"shop slot {sid}: {item} can't be sold")
+import randomize
+early_growth = {}   # (sizes found before the size checks' own table exists)
 ds = Path(shops.DISPLAY_SHOP)
 if shop:
     from evfl import Flow
@@ -60,13 +67,14 @@ problems += [f"shop {s} sells {n} twice" for (s, n), c in by_shop.items() if c >
 import randomize
 gd_bools, gd_exps = randomize.gd_hashes("Bool"), randomize.gd_hashes("BoolExp")
 want_exps = {}   # BoolExp entries the sold-out shelves need
+give_bag = seedinfo.get("bombs_give_bag", True)
 for h, item in pool_item.items():
-    if shops.chest_form(item) != spoiler[h][1]:
+    if randomize.chest_actor(item, give_bag) != spoiler[h][1]:
         problems.append(f"chest {h}: spoiler gives {spoiler[h][1]} for {item}")
 
 dropped_events = seedinfo.get("dropped_events", {})
 seen = collections.defaultdict(set)
-growth = {}
+growth = dict(early_growth)
 files = sorted(overlay.rglob("*.bcett.byml.zs"))
 for f in files:
     rel = f.relative_to(overlay).as_posix()
@@ -222,7 +230,7 @@ if json.loads((overlay / "seed.json").read_text(encoding="utf-8")).get("cutscene
           f"{len(cutscenes.KAEPORA_TIMELINES)} cut (only links / length changed)")
 
 bomb = Path("Pack/Actor/Item_Bomb.pack.zs")
-if not json.loads((overlay / "seed.json").read_text(encoding="utf-8")).get("bombs_need_bracelet", True):
+if not seedinfo.get("bombs_need_bracelet", True):
     from nxfmt import Byml, parse_sarc
     lift = "Component/LiftableParam/Item_Bomb.game__component__LiftableParam.bgyml"
     a, b = unzs((ROMFS / bomb).read_bytes()), unzs((overlay / bomb).read_bytes())
@@ -233,7 +241,9 @@ if not json.loads((overlay / "seed.json").read_text(encoding="utf-8")).get("bomb
         print(f"bombs: LiftGrade lowered to the pots' grade, {len(diff)} byte(s) differ")
 elif (overlay / bomb).exists():
     problems.append("Item_Bomb.pack in the overlay although bombs keep needing the bracelet")
-
+swapped = sum(1 for h, item in pool_item.items() if randomize.chest_actor(item, give_bag) != shops.chest_form(item))
+if swapped:
+    print(f"bombs: {swapped} chest bomb packs hold Bombchus (bombs don't bring the Bomb Bag)")
 seedinfo = json.loads((overlay / "seed.json").read_text(encoding="utf-8"))
 if not seedinfo.get("free_magic", True):
     import itempatches
@@ -263,8 +273,8 @@ elif seedinfo.get("magic_packs"):
 import itempatches
 from nxfmt import Byml
 info = Path(itempatches.POUCH_INFO)
-no_magic, bag = not seedinfo.get("free_magic", True), seedinfo.get("bombs_give_bag", False)
-if no_magic or bag or prices:
+no_magic = not seedinfo.get("free_magic", True)
+if no_magic or prices:
     a, b = unzs((ROMFS / info).read_bytes()), unzs((overlay / info).read_bytes()) if (overlay / info).exists() else b""
     ra = {r["__RowId"]: r for r in Byml(a).root}
     rb = {r["__RowId"]: r for r in Byml(b).root} if b else {}
@@ -275,22 +285,20 @@ if no_magic or bag or prices:
         if bad:
             break
         want_row = {k: v for k, v in r.items() if k not in itempatches.RSDB_MAGIC_KEYS} if n in gone else dict(r)
-        if bag and n in randomize.BOMB_ROWS:
-            want_row["IsAbleToGetBagIfGet"] = True
         bad = rb[n] != want_row
     if b:
         growth[info.as_posix()[:-3]] = len(b) - len(a)
     if bad or (no_magic and not gone):
         problems.append("PouchActorInfo: unexpected edit, or the magic / bag rows not patched")
     else:
-        print(f"item table: {len(gone)} magic rows without magic" + (", bombs give the Bomb Bag" if bag else ""))
+        print(f"item table: {len(gone)} magic rows without magic" + "")
 elif (overlay / info).exists():
     problems.append("item table in the overlay although no option changes it")
 
 new_sizes = {}
 if prices:   # chest items on shelves: their Shop_Rando_ actors and table rows
     from nxfmt import Byml, parse_sarc
-    sold = {i for i in shop.values() if not i.startswith("Shop_")}
+    sold = {i for i in shop.values() if shops.shop_form(i).startswith(shops.RANDO_PREFIX)}
     if set(prices) != sold:
         problems.append(f"shops: prices for {sorted(set(prices))} but sold {sorted(sold)}")
     for item in sorted(sold):

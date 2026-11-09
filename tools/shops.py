@@ -122,10 +122,17 @@ def pouch_rows():
     return _pouch_rows
 
 
+# Chest items a shop sells as its own shop item: a chest's 5 bombs bring the Bomb Bag (compiled rule, see randomize
+# chest_actor), the shops' 5 bombs need it.
+SOLD_AS = {"Item_BombBundle_Small": "Shop_BombBundle_01"}
+
+
 def shop_form(item):
     """The actor a shop shelf shows for item, or None when it can't be sold."""
     if item.startswith("Shop_"):
         return item
+    if item in SOLD_AS:
+        return SOLD_AS[item]
     if item.startswith(NOT_FOR_SALE_PREFIXES) or item in NOT_FOR_SALE or item not in pouch_rows():
         return None
     return RANDO_PREFIX + item
@@ -324,7 +331,8 @@ def unlock_bombs(data):
 # stack programs, found from the game's own (2026-11-09): [0, bool hash] pushes a Bool, [10, hash] a BoolExp,
 # [5] is not, [3] and. They aren't saved (SaveFileIndex -1), so adding some leaves the save layout as it is.
 # Heart Pieces stay buyable: there are several, and one owned sets IsGet for all.
-NOT_SOLD_OUT = {"Obj_Heart_Piece"}
+NOT_SOLD_OUT = {"Obj_Heart_Piece", "Item_BombBundle_Small", "Item_BombchuBundle_Small", "Item_BombchuBundle_Medium",
+                "Item_BombchuBundle_Large", "Item_DekuStickBundle_Small"}   # (and the refills: buy again)
 OP_BOOL, OP_BOOLEXP, OP_NOT, OP_AND = 0, 10, 5, 3
 
 

@@ -49,7 +49,7 @@ While a randomized game runs, its window is titled "Hookshot Randomized - seed N
 | Skips | Skip the intro: opening movie and Navi waking Link | on |
 | Skips | Skip cutscenes: Saria's scenes, area intros, Kaepora Gaebora's talks | on |
 | Items | Bombs need the Goron's Bracelet: the game's own rule; off lets a child hold bombs without it | off |
-| Items | Bombs give the Bomb Bag: the first bombs found bring the bag, as Deku Nuts and Sticks bring theirs; off, as in the game, bombs found before the bag are lost | off |
+| Items | Bombs give the Bomb Bag: on, as in the game, the first bombs found in a chest bring the bag; off, bombs only come with the Bomb Bag, and bomb packs in chests hold Bombchus instead (the game's compiled code always hands out the bag with chest bombs) | off |
 | Items | Bombchus without the Bomb Bag: a save starts with room for 10, so Bombchus work before the bag (the game has one count for bombs and Bombchus, so chest bombs before the bag work too) | off |
 | Items | Magic items give the magic meter: the game's failsafe; off means only Great Fairies give magic | off |
 | Bug fixes | Start with Deku Nuts (0 nuts): stops an adult item a child finds first (e.g. Ice Arrows) from taking the item bar and blocking every item | on |

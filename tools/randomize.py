@@ -164,24 +164,21 @@ def skip_intro(data):
     return bytes(out)
 
 
-# Bombs give the Bomb Bag (option): Deku Nuts and Sticks bring their bag with the first ones found (their PouchActorInfo
-# rows have IsAbleToGetBagIfGet and a SmallBagActor; Item_NutBag_Small came with the first nuts, tested 2026-11-08).
-# Bombs have the SmallBagActor (Item_BombBag_Small) but not the flag, so bombs found without the bag are lost, as in
-# the game. The option sets the flag on the bombs' rows.
-BOMB_ROWS = ("Item_Bomb", "Obj_Bomb")
+# Bombs give the Bomb Bag (option). In this remake the first bombs found bring the Bomb Bag, and no data edit stopped
+# it (2026-11-09, seeds 1210-1213, each tried in game): not the chest bombs' pack (IsAbleToGetBagIfGet false,
+# SmallBagActor ""), not SmallBagActor taken off the PouchActorInfo rows of Item_Bomb / Obj_Bomb / Pouch_Bomb, not off
+# the bombs' PouchContentParam in all four packs carrying a copy. The rule is in the compiled code. So with the option
+# off, a bomb pack placed in a chest becomes a Bombchu pack of the same size (chest_actor): only the Bomb Bag itself
+# gives bombs, and bombs in shops wait for the bag (the shop's pouch check refuses them before). On: the game as it is.
+BOMBS_AS_BOMBCHUS = {"Item_BombBundle_Small": "Item_BombchuBundle_Small"}   # 5 bombs -> 5 Bombchus
 
 
-def bombs_get_bag(data):
-    """PouchActorInfo data with IsAbleToGetBagIfGet set on the bombs' rows (a rewrite, bymlw)."""
-    import bymlw
-    root, meta = bymlw.loads(data)
-    rows = {r["__RowId"]: r for r in root}
-    for n in BOMB_ROWS:
-        assert rows[n].get("SmallBagActor", "").endswith("Item_BombBag_Small.engine__actor__ActorParam.gyml"), \
-            f"PouchActorInfo changed: {n} has no Bomb Bag as its SmallBagActor"
-        rows[n]["IsAbleToGetBagIfGet"] = True
-    return bymlw.dumps(root, meta["endian"], meta["version"])
-
+def chest_actor(item, bombs_give_bag=True):
+    """What a chest holding item gives: its chest form (shops.chest_form), with bombs as Bombchus when bombs don't
+    bring the bag."""
+    import shops
+    a = shops.chest_form(item)
+    return a if bombs_give_bag else BOMBS_AS_BOMBCHUS.get(a, a)
 
 # Bombchus without the Bomb Bag (option): in this remake Bombchus have no capacity of their own, they use the bombs'
 # (PouchActorInfo Item_Bombchu: MaxNumGameData "Bomb"; the save has no PouchContentMaxNum.Bombchu). Without a Bomb Bag
@@ -354,9 +351,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     drops = collections.defaultdict(dict)
     dropped_events = {}
     for loc in locs:
-        if assignment[loc["hash"]] != loc["item"]:
+        actor = chest_actor(assignment[loc["hash"]], bombs_give_bag)
+        if actor != loc["item"]:
             for f in loc["files"]:
-                per_file[f][loc["hash"]] = shops.chest_form(assignment[loc["hash"]])
+                per_file[f][loc["hash"]] = actor
                 if is_item_event(loc["event"]):
                     drops[f][loc["hash"]] = ["GetEventName"]
                     dropped_events[loc["hash"]] = loc["event"]
@@ -398,7 +396,7 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
         print("  shops: bombs for sale before the Goron's Ruby (DisplayShop checks)")
 
     new_sizes = {}
-    sold = sorted({i for i in shop.values() if not i.startswith("Shop_")})   # chest items now on a shelf
+    sold = sorted({i for i in shop.values() if shops.shop_form(i).startswith(shops.RANDO_PREFIX)})   # new shelf actors
     prices = {}
     if sold:
         price_rng = random.Random(f"{seed}/prices")
@@ -453,6 +451,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     if not bombs_need_bracelet:
         bdata, bdict = read_original(BOMB_PACK)
         write_zs(BOMB_PACK, staging, bombs_without_bracelet(bdata), bdict)
+    swapped = sum(1 for l in locs if chest_actor(assignment[l["hash"]], bombs_give_bag) !=
+                  shops.chest_form(assignment[l["hash"]]))
+    if swapped:
+        print(f"  bombs: {swapped} chest bomb packs hold Bombchus instead (bombs don't bring the Bomb Bag)")
 
     magic_packs = []
     if not free_magic:
@@ -472,11 +474,8 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     else:
         idata, idict = read_original(shops.POUCH_INFO)
         pouch_info = (idata, idata, idict)
-    if pouch_info[1] != pouch_info[0] or prices or bombs_give_bag:   # (magic rows, the bag rule, shop rows)
+    if pouch_info[1] != pouch_info[0] or prices:   # (the magic rows, then the shop rows)
         idata, new, idict = pouch_info
-        if bombs_give_bag:
-            new = bombs_get_bag(new)
-            print(f"  bombs: the first bombs found give the Bomb Bag ({', '.join(BOMB_ROWS)})")
         if prices:
             new = shops.add_rows(shops.POUCH_INFO, new, prices)
         write_zs(shops.POUCH_INFO, staging, new, idict)
@@ -499,19 +498,20 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     tdata, tdict = read_original(table_rel)
     write_zs(table_rel, staging, add_sizes(raise_sizes(tdata, growth), new_sizes), tdict)
 
-    moved = sum(1 for l in locs if assignment[l["hash"]] != l["item"])
+    moved = sum(1 for l in locs if chest_actor(assignment[l["hash"]], bombs_give_bag) != l["item"])
     lines = [f"Chest randomizer, no logic. Seed {seed}. Chests shuffled: {shuffle_chests}. Flags: {flags or 'none changed'}. Intro skip: {intro_skip}. "
              f"Cutscene skips: {cutscene_skip}. Bombs need the Goron's Bracelet: {bombs_need_bracelet}. "
              f"Magic items give magic: {free_magic}.",
              f"{len(locs)} chests, {moved} hold something new.", ""]
     for loc in sorted(locs, key=lambda l: (l["area"], l["files"][0], l["hash"])):
-        mark = "" if assignment[loc["hash"]] == loc["item"] else "   (was " + loc["item"] + ")"
+        item = assignment[loc["hash"]]
+        actor = chest_actor(item, bombs_give_bag)
+        mark = "" if actor == loc["item"] else "   (was " + loc["item"] + ")"
         if loc["hash"] in dropped_events:
             mark += f" [event {dropped_events[loc['hash']]} removed]"
         if loc["hash"] in kept_hashes:
             mark += "   [kept]"
-        item = assignment[loc["hash"]]
-        shown = item if shops.chest_form(item) == item else f"{shops.chest_form(item)} (shop item {item})"
+        shown = item if actor == item else f"{actor} (for {item})"
         lines.append(f"{loc['area']:<22} {loc['actor']:<24} {loc['hash']:>20}  {shown}{mark}")
     if slots:
         lines += ["", f"Shops: {len(slots)} slots (shop slot id = area/shopkeeper/shelf place).", ""]
