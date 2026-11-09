@@ -171,6 +171,35 @@ def skip_intro(data):
 # off, a bomb pack placed in a chest becomes a Bombchu pack of the same size (chest_actor): only the Bomb Bag itself
 # gives bombs, and bombs in shops wait for the bag (the shop's pouch check refuses them before). On: the game as it is.
 BOMBS_AS_BOMBCHUS = {"Item_BombBundle_Small": "Item_BombchuBundle_Small"}   # 5 bombs -> 5 Bombchus
+# Once the bag is owned such a chest gives the bombs after all, by the chests' own owned-item check: a chest with
+# Drop__CheckActor gives Drop__DropActor_Substitute instead when that actor is owned (the game has two chests giving a
+# red rupee, or arrows when the Bow is owned). Map files get the two keys by a rewrite (bymlw): most don't have the key
+# names yet.
+BOMB_CHECK = {"Drop__CheckActor": "Item_BombBag_Small", "Drop__DropActor_Substitute": "Item_BombBundle_Small"}
+# Only one chest kind reads those keys: every chest of the game that has them is an Obj_TBox_A_06 (its own AI, DropParam
+# and Drop__CheckCondition). It's the plain small chest (Obj_TBox_A_01, same model, its $parent) with that check.
+# A plain Obj_TBox_A_01 given the keys still gave Bombchus with the bag owned (seed 1215). So the chest becomes an
+# A_06; other chest kinds (big chests, ...) keep giving Bombchus.
+CHECK_CHEST = {"Obj_TBox_A_01": "Obj_TBox_A_06", "Obj_TBox_A_01_NoBake": "Obj_TBox_A_06_NoBake"}
+
+
+def needs_bag_check(item, bombs_give_bag=True, chest="Obj_TBox_A_01"):
+    """Whether a chest (of actor kind chest) holding item gives its bombs only with the bag (BOMB_CHECK)."""
+    import shops
+    return not bombs_give_bag and shops.chest_form(item) in BOMBS_AS_BOMBCHUS and chest in CHECK_CHEST
+
+
+def set_chest_checks(data, checks):
+    """Map data with each chest Hash -> {key: value} of checks added to its Dynamic (a rewrite, bymlw)."""
+    import bymlw
+    root, meta = bymlw.loads(data)
+    left = dict(checks)
+    for a in root["Actors"]:
+        h = int(a.get("Hash", -1))
+        if h in left:
+            a.setdefault("Dynamic", {}).update(left.pop(h))
+    assert not left, f"chests not found: {sorted(left)}"
+    return bymlw.dumps(root, meta["endian"], meta["version"])
 
 
 def chest_actor(item, bombs_give_bag=True):
@@ -350,8 +379,14 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     per_file = collections.defaultdict(dict)
     drops = collections.defaultdict(dict)
     dropped_events = {}
+    bag_checks = collections.defaultdict(dict)   # map file -> {chest Hash: BOMB_CHECK}
+    chest_kind = collections.defaultdict(dict)   # map file -> {chest Hash: its new actor kind (CHECK_CHEST)}
     for loc in locs:
         actor = chest_actor(assignment[loc["hash"]], bombs_give_bag)
+        if needs_bag_check(assignment[loc["hash"]], bombs_give_bag, loc["actor"]):
+            for f in loc["files"]:
+                bag_checks[f][loc["hash"]] = dict(BOMB_CHECK)
+                chest_kind[f][loc["hash"]] = CHECK_CHEST[loc["actor"]]
         if actor != loc["item"]:
             for f in loc["files"]:
                 per_file[f][loc["hash"]] = actor
@@ -371,11 +406,14 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
                 sold_out[rel][h] = shop[s["id"]]
     exps = {}
     growth = {}
-    for rel in sorted(set(per_file) | set(shelf) | set(sold_out)):
+    for rel in sorted(set(per_file) | set(shelf) | set(sold_out) | set(bag_checks)):
         data, zdict = read_original(rel)
         new = data
         if rel in per_file:
             new = apply_items(new, per_file[rel], drops[rel])
+        if rel in bag_checks:
+            new = set_chest_checks(new, bag_checks[rel])
+            new = set_gyaml(new, chest_kind[rel])
         if rel in shelf:
             new = set_gyaml(new, shelf[rel])
         if rel in sold_out:
@@ -454,7 +492,7 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
     swapped = sum(1 for l in locs if chest_actor(assignment[l["hash"]], bombs_give_bag) !=
                   shops.chest_form(assignment[l["hash"]]))
     if swapped:
-        print(f"  bombs: {swapped} chest bomb packs hold Bombchus instead (bombs don't bring the Bomb Bag)")
+        print(f"  bombs: {swapped} chest bomb packs hold Bombchus until the Bomb Bag is owned (bombs don't bring it)")
 
     magic_packs = []
     if not free_magic:
@@ -517,7 +555,7 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
         lines += ["", f"Shops: {len(slots)} slots (shop slot id = area/shopkeeper/shelf place).", ""]
         for s in slots:
             item = shop[s["id"]]
-            price = f"  for {prices[item]} rupees" if item in prices else ""
+            price = ""   # (the price set for a new shop actor isn't what the shop asks yet: not shown)
             mark = "" if item == s["item"] else "   (was " + s["item"] + ")"
             lines.append(f"{s['id']:<46} {item}{price}{mark}")
     (staging / "spoiler.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")

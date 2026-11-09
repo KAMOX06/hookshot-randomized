@@ -30,8 +30,8 @@ OPTIONS = [
     ("Randomize", [
         ("shuffle_chests", "Shuffle chest items", True, "Every chest's item is shuffled (dungeon items stay in their dungeon). No logic.", True),
         ("shuffle_shops", "Shuffle shop items", False,
-         "Shop items join the pool: they can be in chests and other shops, and chest items in shops (random price, "
-         "10 to 90). Bottle contents and hearts stay in shops; the Happy Mask Shop is left alone.", True),
+         "Shop items join the pool: they can be in chests and other shops, and chest items in shops. Bottle "
+         "contents and hearts stay in shops; the Happy Mask Shop is left alone.", True),
         ("shuffle_events", "Shuffle event items (NPC gifts)", False, "Not built yet (e.g. Saria's ocarina).", False),
     ]),
     ("Important items", [
@@ -50,8 +50,8 @@ OPTIONS = [
         ("bombs_need_bracelet", "Bombs need the Goron's Bracelet", False,
          "The game's own rule: without the bracelet a bomb vanishes as soon as it's taken out.", True),
         ("bombs_give_bag", "Bombs give the Bomb Bag", False,
-         "On: as in the game, the first bombs found in a chest bring the Bomb Bag. Off: bombs only come with the "
-         "Bomb Bag; bomb packs in chests hold Bombchus instead (the game can't be made to keep the bag back).", True),
+         "On: as in the game, the first bombs found in a chest bring the Bomb Bag. Off: bombs don't give the Bomb "
+         "Bag; every chest holding bombs gives Bombchus instead until the Bomb Bag is found, then bombs.", True),
         ("bombchus_without_bag", "Bombchus without the Bomb Bag", False,
          "Bombchus found or bought before the Bomb Bag can be used (up to 10). The game keeps one count for bombs and "
          "Bombchus, "

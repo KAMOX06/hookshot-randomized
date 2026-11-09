@@ -74,6 +74,7 @@ for h, item in pool_item.items():
 
 dropped_events = seedinfo.get("dropped_events", {})
 seen = collections.defaultdict(set)
+checked = set()   # (map file, chest hash) given the Bomb Bag check
 growth = dict(early_growth)
 files = sorted(overlay.rglob("*.bcett.byml.zs"))
 for f in files:
@@ -102,17 +103,30 @@ for f in files:
             continue
         od, nd = dict(o.get("Dynamic") or {}), dict(n.get("Dynamic") or {})
         od.pop("Drop__DropActor", None), nd.pop("Drop__DropActor", None)
+        o_rest = {k: v for k, v in o.items() if k != "Dynamic"}
+        if randomize.needs_bag_check(pool_item.get(o.get("Hash"), ""), give_bag, o.get("Gyaml")):
+            if any(nd.pop(k, None) != v for k, v in randomize.BOMB_CHECK.items()) or \
+                    n.get("Gyaml") != randomize.CHECK_CHEST[o["Gyaml"]]:
+                problems.append(f"{rel}: {o['Hash']} lacks the Bomb Bag check or its check chest kind")
+            checked.add((rel, o["Hash"]))
+            o_rest["Gyaml"] = n.get("Gyaml")
         if str(o.get("Hash")) in dropped_events:
             if od.get("GetEventName") != dropped_events[str(o["Hash"])] or "GetEventName" in nd:
                 problems.append(f"{rel}: {o['Hash']} event not removed as seed.json says")
             od.pop("GetEventName", None)
-        if od != nd or {k: v for k, v in o.items() if k != "Dynamic"} != {k: v for k, v in n.items() if k != "Dynamic"}:
+        if od != nd or o_rest != {k: v for k, v in n.items() if k != "Dynamic"}:
             problems.append(f"{rel}: {o.get('Hash')} changed beyond its item")
         h, item = n["Hash"], n["Dynamic"]["Drop__DropActor"]
         if spoiler.get(h, (None, None))[1] != item:
             problems.append(f"{rel}: {h} holds {item}, spoiler says {spoiler.get(h)}")
         seen[h].add(item)
 problems += [f"chest {h}: copies disagree {v}" for h, v in seen.items() if len(v) > 1]
+_want_checked = {("Banc/" + c["file"].replace("\\", "/"), c["hash"]) for c in
+                 json.loads((Path(__file__).parent / "chests.json").read_text(encoding="utf-8"))
+                 if c["hash"] in pool_item and randomize.needs_bag_check(pool_item[c["hash"]], give_bag, c["actor"])}
+problems += [f"{r}: chest {h} should have the Bomb Bag check" for r, h in _want_checked - checked]
+if _want_checked:
+    print(f"bombs: {len({h for _, h in _want_checked})} chests give Bombchus until the Bomb Bag, then bombs")
 problems += [f"{rel}: shop item {h} should be {k}, but its map file isn't in the overlay"
              for (rel, h), k in shelf.items() if k != shelf_was[(rel, h)]]
 
