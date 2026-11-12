@@ -395,8 +395,16 @@ class App:
 
     def continue_seed(self):
         info = seed_info()
-        if info:
-            self.launch(info["seed"])
+        if not info:
+            return
+        from randomize import size_table_base
+        if info.get("size_table_base") != size_table_base():   # (made before a Hookshot update: it would crash)
+            messagebox.showwarning(TITLE, f"Hookshot was updated since seed {info['seed']} was made, and the game "
+                                          "would crash on it.\n\nPut the same seed number in the Seed box and "
+                                          "click Make seed & play: with the same options it holds the same items, and your saves are kept.")
+            self.seed.set(str(info["seed"]))
+            return
+        self.launch(info["seed"])
 
     def normal_game(self):
         if not EXE.exists():

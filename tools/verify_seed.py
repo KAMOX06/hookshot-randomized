@@ -514,8 +514,9 @@ if json.loads((overlay / "seed.json").read_text(encoding="utf-8")).get("intro_sk
 elif (overlay / opening).exists():
     problems.append("OpeningEvent in the overlay although the intro is kept")
 
-rstb = next((ROMFS / "System" / "Resource").glob("ResourceSizeTable.Product.*.rsizetable.zs"))
-a, b = unzs(rstb.read_bytes()), unzs((overlay / rstb.relative_to(ROMFS)).read_bytes())
+from nxfmt import rstb_path
+rstb_rel, rstb_src = rstb_path()   # (the table the game uses: Hookshot's copy when it has one)
+a, b = unzs(rstb_src.read_bytes()), unzs((overlay / rstb_rel).read_bytes())
 ncrc, ncrc_b = struct.unpack_from("<I", a, 14)[0], struct.unpack_from("<I", b, 14)[0]
 expect = {binascii.crc32(p.encode()): g for p, g in growth.items() if g}
 ta = dict(struct.unpack_from("<II", a, 22 + 8 * i) for i in range(ncrc))

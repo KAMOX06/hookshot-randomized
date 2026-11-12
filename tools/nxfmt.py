@@ -22,6 +22,17 @@ def game_folder():
 
 GAME = game_folder() or Path("game-folder-not-set")
 ROMFS = GAME / "romfs"
+# Hookshot v2.1.0+ serves its own copy of the resource size table in place of the game's (prompts\rsizetable.zs:
+# the game's with the entry of Font2/Scalable/External...bfttf raised for its controller icon font). An overlay's
+# table replaces that copy too, so a seed's table must start from it: started from the game's, the font no longer
+# fits and the game crashes on start (exception 0xc0000005 in sead::MainThread, 2026-11-12).
+HOOKSHOT_RSTB = GAME / "prompts" / "rsizetable.zs"
+
+
+def rstb_path():
+    """(romfs-relative path of the resource size table, the file its data comes from: Hookshot's copy if any)."""
+    rel = next((ROMFS / "System" / "Resource").glob("ResourceSizeTable.Product.*.rsizetable.zs"))
+    return rel.relative_to(ROMFS).as_posix(), (HOOKSHOT_RSTB if HOOKSHOT_RSTB.exists() else rel)
 
 
 def parse_sarc(data):

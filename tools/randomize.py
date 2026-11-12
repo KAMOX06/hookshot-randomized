@@ -292,6 +292,14 @@ def load_chests():
     return list(by_hash.values())
 
 
+def size_table_base():
+    """crc32 of the size table a seed's table is made from (nxfmt.rstb_path): when Hookshot's copy changes (an
+    update), seeds made before it would crash the game; the launcher compares this before starting one."""
+    import binascii
+    from nxfmt import rstb_path
+    return binascii.crc32(rstb_path()[1].read_bytes())
+
+
 def shuffle(locs, rng, slots=None, dungeon_items_anywhere=False):
     """{chest hash: item}, and with shop slots given (shops.survey()) also {slot id: item}: the shops' items join the
     pool (shops.assign). Without slots the result is the same as before shop shuffle existed (same seeds).
@@ -306,6 +314,9 @@ def shuffle(locs, rng, slots=None, dungeon_items_anywhere=False):
         if loc["item"].startswith("Item_Dungeon_") and loc["area"] in DUNGEONS:
             dungeon_items[loc["area"]].append(loc)
     field = [l for l in locs if l["area"] not in DUNGEONS and l["area"] not in NO_CREDIT_AREAS]
+    if slots:   # (the shelves the items that can't go in a chest need, kept for them: shops.assign)
+        import shops
+        shop_only = sum(1 for i in [l["item"] for l in locs] + [s["item"] for s in slots] if shops.chest_form(i) is None)
     for area, group in sorted(dungeon_items.items()):
         if dungeon_items_anywhere:   # keys first, into their own dungeon; then the others, own dungeon or field
             keys = [l for l in group if l["item"] not in DUNGEON_CREDITED]
@@ -318,7 +329,8 @@ def shuffle(locs, rng, slots=None, dungeon_items_anywhere=False):
             for loc in others:   # (the credit is the chest's event: not in chests with a story event of their own)
                 room = [l for l in locs if l["area"] == area or l in field and not has_story_event(l)]
                 room = [l["hash"] for l in room if l["hash"] not in assignment]
-                room += [s for s in slot_ids if s not in shop_pre]
+                if len(slot_ids) - len(shop_pre) > shop_only if slots else False:
+                    room += [s for s in slot_ids if s not in shop_pre]
                 place = rng.choice(room)
                 if place in slot_ids:
                     shop_pre[place] = loc["item"]
@@ -673,8 +685,10 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
         print("  start: the new-game setup also gives " +
               ", ".join(f"{p.split('/')[-1].split('.')[0]} x{n}" for p, n in START_PUSHES))
 
-    table_rel = RSTB.relative_to(ROMFS).as_posix()
-    tdata, tdict = read_original(table_rel)
+    from nxfmt import rstb_path, unzs
+    table_rel, table_src = rstb_path()   # (Hookshot's own copy when it has one: nxfmt.HOOKSHOT_RSTB)
+    _, tdict = read_original(table_rel)
+    tdata = unzs(table_src.read_bytes())
     write_zs(table_rel, staging, add_sizes(raise_sizes(tdata, growth), new_sizes), tdict)
 
     moved = sum(1 for l in locs if chest_actor(assignment[l["hash"]], bombs_give_bag) != l["item"])
@@ -714,6 +728,7 @@ def build(seed, out, flags, intro_skip=True, cutscene_skip=True, bombs_need_brac
                                                    "bombchus_without_bag": bombchus_without_bag,
                                                    "bombs_give_bag": bombs_give_bag,
                                                    "dungeon_items_anywhere": dungeon_items_anywhere,
+                                                   "size_table_base": size_table_base(),
                                                    "dungeon_credits": {str(h): list(v) for h, v in credits.items()},
                                                    "shop_dungeon": {s: [i.item, i.dungeon, i.n, shelf_rows[i.shelf][1]]
                                                                     for s, i in instances.items()},

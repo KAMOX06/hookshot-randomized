@@ -71,7 +71,9 @@ placements with a Clear button.
 
 ## After a recomp update
 
-Delete `tools\chests.json` and `tools\shops.json` (they're rebuilt on the next start), then make a new seed. Every patch checks the original
+Delete `tools\chests.json` and `tools\shops.json` (they're rebuilt on the next start), then make a new seed: a seed
+made before a Hookshot update can crash the game, and **Continue seed** says so instead of starting it (make the same
+seed number again: with the same options it holds the same items and keeps its saves). Every patch checks the original
 data before changing it, so a game update that moves something stops the build with an error rather than making a
 broken seed.
 
@@ -84,7 +86,7 @@ Everything is in `tools\`, Python standard library only:
 | `gui.py`, `launcher.py` | The launcher window, and the older text menu; starting the game with the overlay and a per-seed save folder |
 | `randomize.py` | Builds a seed: shuffle, world flags, all patches, spoiler log, `seed.json` |
 | `verify_seed.py` | Checks a seed against the game's files: only the intended bytes changed, items as a whole kept |
-| `nxfmt.py`, `bymledit.py` | zstd (with the game's dictionaries), SARC, BYML reading and in-place editing; resource size table |
+| `nxfmt.py`, `bymledit.py` | zstd (with the game's dictionaries), SARC, BYML reading and in-place editing; resource size table (built from Hookshot's own copy, `prompts\rsizetable.zs`, when it has one: Hookshot v2.1.0 raises its button-icon font's entry there, and a table without that crashes the game at start) |
 | `bymlw.py` | BYML reading with types kept and writing, SARC writing: for new actor packs and added table rows |
 | `shops.py` | Shop shuffle: the shop slots, new shop actors for chest items, item table rows, sold-out conditions |
 | `evfl.py`, `instant.py`, `timelines.py`, `cutscenes.py` | BFEVFL v4 event flows; cutscene skips by rerouting flows or cutting timelines |
